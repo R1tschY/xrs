@@ -1,0 +1,10 @@
+[package]
+name = "xml-dtd"
+version = "0.1.0"
+authors = ["Richard Liebscher <r1tschy@posteo.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+memchr = "2.3.4"

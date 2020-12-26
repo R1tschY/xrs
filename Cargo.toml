@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "components/dtd",
+    "components/xts",
+    "components/parser",
+    "components/dom",
+]
