@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde_explicit_xml::from_reader;
 
-use xml_dom::DomReader;
+use xml_dom::{DomReader, NonValidator};
 
 #[derive(Deserialize)]
 #[serde(rename = "TESTSUITE")]
@@ -160,7 +160,7 @@ fn process_test(test: &Test, indent: &str, base: &str) {
     // ARRANGE
     let path = PathBuf::from(base.to_string() + &test.uri);
     let content = fs::read(path).unwrap();
-    let reader = xml_dom::QuickXmlDomReader::new(&content);
+    let reader = xml_dom::QuickXmlDomReader::new(&content, NonValidator);
 
     // ACT
     let result = panic::catch_unwind(|| reader.parse());

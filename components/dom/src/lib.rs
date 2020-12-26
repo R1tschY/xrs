@@ -4,6 +4,8 @@ use std::borrow::Cow;
 use std::io::Cursor;
 use std::str::{from_utf8, Utf8Error};
 
+use self::chars::*;
+
 mod chars;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -100,7 +102,7 @@ pub trait XmlValidator {
     fn validate_text(&self, text: &[u8]) -> Result<(), XmlError>;
 }
 
-struct NonValidator;
+pub struct NonValidator;
 
 impl XmlValidator for NonValidator {
     fn validate_tag(&self, _tag: &[u8]) -> Result<(), Error> {
@@ -187,8 +189,7 @@ impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
                     root = Some(self.create_element(start));
                     break;
                 }
-                Event::Text(text)
-                    if text.is_empty() || text.iter().all(|c| c.is_ascii_whitespace()) =>
+                Event::Text(text) if text.as_ref().only_xml_whitespace() =>
                 {
                     continue
                 }
@@ -323,7 +324,7 @@ impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
         loop {
             match self.reader.read_event(&mut buffer)? {
                 Event::Eof => return Ok(doc),
-                Event::Text(text) if text.iter().all(|b| b.is_ascii_whitespace()) => (),
+                Event::Text(text) if text.as_ref().only_xml_whitespace() => (),
                 _ => return Err(XmlError::UnexpectedToken("trailing content".to_string())),
             }
         }
