@@ -47,6 +47,7 @@ impl Error {
             Reason::IllegalPatternInComment => "`--` not allowed in comment".to_string(),
             Reason::PrologCharacters => "non-whitespace characters in prolog".to_string(),
             Reason::InvalidName => "invalid XML name".to_string(),
+            Reason::IllegalChar(c) => format!("illegal character: `{:?}`", c.escape_debug()),
         }
     }
 }
@@ -97,4 +98,5 @@ pub enum Reason {
     PrologCharacters,
     IllegalPatternInComment,
     InvalidName,
+    IllegalChar(char),
 }

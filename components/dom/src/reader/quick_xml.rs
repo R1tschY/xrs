@@ -170,7 +170,7 @@ where
                     .validator
                     .validate_comment(self.last_offset, comment.escaped())?,
                 Event::CData(_) => unimplemented!(),
-                Event::PI(_) => {} // ignore
+                Event::PI(pi) => self.validator.validate_pi(self.last_offset, pi.escaped())?,
                 Event::Eof => return Err(self.error(Reason::UnexpectedEof)),
             }
         }
@@ -212,7 +212,7 @@ where
                 Event::Comment(comment) => self
                     .validator
                     .validate_comment(self.last_offset, comment.escaped())?,
-                Event::PI(_) => (), // TODO
+                Event::PI(pi) => self.validator.validate_pi(self.last_offset, pi.escaped())?, // TODO
                 Event::Decl(decl) => {
                     if doc_doctype.is_some() || doc_decl.is_some() {
                         return Err(self.error(Reason::UnexpectedDecl));
