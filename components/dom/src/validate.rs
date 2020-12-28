@@ -21,3 +21,19 @@ impl XmlValidator for NonValidator {
         Ok(())
     }
 }
+
+pub struct WellFormedValidator;
+
+impl XmlValidator for WellFormedValidator {
+    fn validate_tag(&self, tag: &[u8]) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn validate_comment(&self, _comment: &[u8]) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn validate_text(&self, _text: &[u8]) -> Result<(), Error> {
+        Ok(())
+    }
+}

@@ -1,11 +1,14 @@
-use crate::chars::XmlBytesExt;
-use crate::dom::{Document, Element};
-use crate::reader::DomReader;
-use crate::Span;
-use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
-use quick_xml::Error;
 use std::io::Cursor;
 use std::str::from_utf8;
+
+use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
+use quick_xml::Error as XmlError;
+
+use crate::chars::XmlBytesExt;
+use crate::dom::{Document, Element};
+use crate::error::{Error, Reason, Result};
+use crate::reader::DomReader;
+use crate::Span;
 
 pub struct QuickXmlDomReader<'r, V> {
     bytes: &'r [u8],
@@ -33,109 +36,79 @@ impl<'r, V> QuickXmlDomReader<'r, V> {
             start.attributes_raw().len(),
         )
     }
-}
 
-impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
-    type Error = quick_xml::Error;
+    pub fn error(&self, reason: Reason) -> Error {
+        Error::new(self.reader.buffer_position(), 0, reason)
+    }
 
-    fn parse(mut self) -> Result<Document<'r>, Self::Error> {
-        self.reader.check_comments(false);
-        self.reader.check_end_names(false);
-        self.reader.trim_text(false);
-        self.reader.trim_markup_names_in_closing_tags(true); // TODO: \x0c is not xml whitespace
+    pub fn conv_utf8<'a>(&self, s: &'a [u8]) -> Result<&'a str> {
+        from_utf8(s).map_err(|err| self.error(Reason::Utf8(err)))
+    }
 
-        let mut buffer: Vec<u8> = Vec::with_capacity(1024);
+    fn xml_error(err: quick_xml::Error, offset: usize) -> Error {
+        match err {
+            quick_xml::Error::Io(err) => Error::new(offset, 0, Reason::Io(err)),
+            quick_xml::Error::Utf8(err) => Error::new(offset, 0, Reason::Utf8(err)),
+            quick_xml::Error::UnexpectedEof(_) => Error::new(offset, 0, Reason::UnexpectedEof),
+            quick_xml::Error::EndEventMismatch { expected, found } => {
+                Error::new(offset, 0, Reason::EndEventMismatch { expected, found })
+            }
+            quick_xml::Error::UnexpectedToken(token) => {
+                Error::new(offset, 0, Reason::UnexpectedToken(token))
+            }
+            quick_xml::Error::UnexpectedBang => Error::new(offset, 0, Reason::InvalidBang),
+            quick_xml::Error::TextNotFound => unreachable!(),
+            quick_xml::Error::XmlDeclWithoutVersion(_) => {
+                Error::new(offset, 0, Reason::XmlDeclWithoutVersion)
+            }
+            quick_xml::Error::NameWithQuote(pos) => {
+                Error::new(offset + pos, 0, Reason::NameWithQuote)
+            }
+            quick_xml::Error::NoEqAfterName(pos) => {
+                Error::new(offset + pos, 0, Reason::NoEqAfterName)
+            }
+            quick_xml::Error::UnquotedValue(pos) => {
+                Error::new(offset + pos, 0, Reason::UnquotedValue)
+            }
+            quick_xml::Error::DuplicatedAttribute(pos1, pos2) => {
+                Error::new(offset + pos1, 0, Reason::DuplicatedAttribute(offset + pos2))
+            }
+            quick_xml::Error::EscapeError(_) => Error::new(offset, 0, Reason::InvalidEntity),
+        }
+    }
+
+    fn read_event<'a>(&mut self, buffer: &'a mut Vec<u8>) -> Result<quick_xml::events::Event<'a>> {
+        self.last_offset = self.offset;
+        let evt = self
+            .reader
+            .read_event(buffer)
+            .map_err(|err| Self::xml_error(err, self.reader.buffer_position()))?;
+        self.offset = self.reader.buffer_position();
+        Ok(evt)
+    }
+
+    fn parse_inner_xml(&mut self, mut buffer: &mut Vec<u8>, start: Element) -> Result<Element> {
         let mut stack: Vec<Element> = Vec::with_capacity(16);
-        let mut root: Option<Element> = None;
-
-        // prolog
-        let mut doc_decl: Option<BytesDecl<'static>> = None;
-        let mut doc_doctype: Option<BytesText<'static>> = None;
+        stack.push(start);
 
         loop {
-            self.last_offset = self.offset;
-            let evt = self.reader.read_event(&mut buffer)?;
-            self.offset = self.reader.buffer_position();
-            match evt {
+            match self.read_event(buffer)? {
                 Event::Start(start) => {
                     stack.push(self.create_element(start));
-                    break;
-                }
-                Event::Empty(start) => {
-                    root = Some(self.create_element(start));
-                    break;
-                }
-                Event::Text(text) if text.as_ref().only_xml_whitespace() => continue,
-                Event::Comment(_) | Event::PI(_) => continue,
-                Event::Decl(decl) => {
-                    if let Some(_doctype) = doc_doctype {
-                        return Err(quick_xml::Error::UnexpectedToken(
-                            "doctype found before decl".to_string(),
-                        ));
-                    }
-                    if let Some(_last_decl) = doc_decl {
-                        return Err(quick_xml::Error::UnexpectedToken(
-                            "Second decl found".to_string(),
-                        ));
-                    }
-                    doc_decl = Some(decl.into_owned());
-                }
-                Event::DocType(doctype) => {
-                    if let Some(_doctype) = doc_doctype {
-                        return Err(quick_xml::Error::UnexpectedToken(
-                            "doctype found before decl".to_string(),
-                        ));
-                    }
-                    doc_doctype = Some(doctype.into_owned());
-                }
-                evt => {
-                    return Err(quick_xml::Error::UnexpectedToken(format!(
-                        "unexpected event before root element: {:?}",
-                        evt
-                    )))
-                }
-            }
-        }
-
-        // Inner XML
-        while stack.len() != 0 {
-            self.last_offset = self.offset;
-            let evt = self.reader.read_event(&mut buffer)?;
-            self.offset = self.reader.buffer_position();
-            match evt {
-                Event::Start(start) => {
-                    stack.push(self.create_element(start));
-                }
-                Event::DocType(evt) => {
-                    return Err(quick_xml::Error::UnexpectedToken(format!(
-                        "unexpected event: {:?}",
-                        evt
-                    )))
-                }
-                Event::Decl(evt) => {
-                    return Err(quick_xml::Error::UnexpectedToken(format!(
-                        "unexpected event: {:?}",
-                        evt
-                    )))
                 }
                 Event::End(end) => {
                     if let Some(element) = stack.pop() {
                         let start_tag = element.tag_bytes(self.bytes);
                         if end.name() != start_tag {
-                            return Err(quick_xml::Error::EndEventMismatch {
-                                expected: from_utf8(start_tag)
-                                    .map_err(|err| quick_xml::Error::Utf8(err))?
-                                    .to_string(),
-                                found: from_utf8(end.name())
-                                    .map_err(|err| quick_xml::Error::Utf8(err))?
-                                    .to_string(),
-                            });
+                            return Err(self.error(Reason::EndEventMismatch {
+                                expected: self.conv_utf8(start_tag)?.to_string(),
+                                found: self.conv_utf8(end.name())?.to_string(),
+                            }));
                         }
 
                         let stack_len = stack.len();
                         if stack_len == 0 {
-                            root = Some(element);
-                            break;
+                            return Ok(element);
                         } else {
                             stack[stack_len - 1].push_child(element);
                         }
@@ -147,8 +120,7 @@ impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
                     let element = self.create_element(start);
                     let stack_len = stack.len();
                     if stack_len == 0 {
-                        root = Some(element);
-                        break;
+                        return Ok(element);
                     } else {
                         stack[stack_len - 1].push_child(element);
                     }
@@ -178,24 +150,71 @@ impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
                         }
                     }
                 }
+                Event::DocType(_) => return Err(self.error(Reason::UnexpectedDocType)),
+                Event::Decl(_) => return Err(self.error(Reason::UnexpectedDecl)),
                 Event::Comment(_) | Event::PI(_) => {} // ignore
                 Event::CData(_) => unimplemented!(),
-                Event::Eof => return Err(Error::UnexpectedEof("missing root end".to_string())),
+                Event::Eof => return Err(self.error(Reason::UnexpectedEof)),
             }
         }
+    }
+}
 
-        let doc = if let Some(root) = root {
-            Document::new(self.bytes, root)
-        } else {
-            unreachable!()
+impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
+    type Error = Error;
+
+    fn parse(mut self) -> Result<Document<'r>> {
+        self.reader.check_comments(false);
+        self.reader.check_end_names(false);
+        self.reader.trim_text(false);
+        self.reader.trim_markup_names_in_closing_tags(true); // TODO: \x0c is not xml whitespace
+
+        let mut buffer: Vec<u8> = Vec::with_capacity(1024);
+
+        // prolog
+        let mut doc_decl: Option<BytesDecl<'static>> = None;
+        let mut doc_doctype: Option<BytesText<'static>> = None;
+
+        let root: Element = loop {
+            match self.read_event(&mut buffer)? {
+                Event::Start(start) => {
+                    let root = self.create_element(start);
+                    break self.parse_inner_xml(&mut buffer, root)?;
+                }
+                Event::Empty(start) => {
+                    break self.create_element(start);
+                }
+                Event::Text(text) if text.as_ref().only_xml_whitespace() => continue,
+                Event::Comment(_) | Event::PI(_) => continue,
+                Event::Decl(decl) => {
+                    if doc_doctype.is_some() || doc_decl.is_some() {
+                        return Err(self.error(Reason::UnexpectedDecl));
+                    }
+                    doc_decl = Some(decl.into_owned());
+                }
+                Event::DocType(doctype) => {
+                    if doc_doctype.is_some() {
+                        return Err(self.error(Reason::UnexpectedDocType));
+                    }
+                    doc_doctype = Some(doctype.into_owned());
+                }
+                Event::End(end) => {
+                    return Err(self.error(Reason::EndEventMismatch {
+                        expected: "".to_string(),
+                        found: self.conv_utf8(end.name())?.to_string(),
+                    }))
+                }
+                Event::Text(_) | Event::CData(_) => {}
+                Event::Eof => {}
+            }
         };
 
         // no trailing content
         loop {
-            match self.reader.read_event(&mut buffer)? {
-                Event::Eof => return Ok(doc),
+            match self.read_event(&mut buffer)? {
+                Event::Eof => return Ok(Document::new(self.bytes, root)),
                 Event::Text(text) if text.as_ref().only_xml_whitespace() => (),
-                _ => return Err(Error::UnexpectedToken("trailing content".to_string())),
+                _ => return Err(self.error(Reason::TrailingContent)),
             }
         }
     }
@@ -203,10 +222,11 @@ impl<'r, V> DomReader<'r> for QuickXmlDomReader<'r, V> {
 
 #[cfg(test)]
 mod tests {
+    use quick_xml::Error as XmlError;
+
     use crate::reader::quick_xml::QuickXmlDomReader;
     use crate::reader::DomReader;
     use crate::validate::NonValidator;
-    use quick_xml::Error as XmlError;
 
     #[test]
     fn only_root() {
@@ -258,26 +278,33 @@ mod tests {
 
     mod structure_fails {
         use super::*;
+        use crate::error::Reason;
 
         #[test]
         fn pre_text() {
             let reader = QuickXmlDomReader::new(b"sdsf<root></roo>", NonValidator);
-            assert!(matches!(reader.parse(), Err(XmlError::UnexpectedToken(_))));
+            assert!(matches!(
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::UnexpectedToken(_))
+            ));
         }
 
         #[test]
         fn wrong_end() {
             let reader = QuickXmlDomReader::new(b"<root></roo>", NonValidator);
             assert!(matches!(
-                reader.parse(), 
-                Err(XmlError::EndEventMismatch { expected, found }) 
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::EndEventMismatch { expected, found })
                 if expected == "root" && found == "roo"));
         }
 
         #[test]
         fn eof() {
             let reader = QuickXmlDomReader::new(b"<root>", NonValidator);
-            assert!(matches!(reader.parse(), Err(XmlError::UnexpectedEof(msg))));
+            assert!(matches!(
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::UnexpectedEof)
+            ));
         }
 
         #[test]
@@ -286,7 +313,10 @@ mod tests {
                 b"<?xml version=\"1.0\" ?><?xml version=\"1.0\" ?><root></root>",
                 NonValidator,
             );
-            assert!(matches!(reader.parse(), Err(XmlError::UnexpectedToken(_))));
+            assert!(matches!(
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::UnexpectedDecl)
+            ));
         }
 
         #[test]
@@ -295,7 +325,10 @@ mod tests {
                 b"<!DOCTYPE root SYSTEM \"scheme.dtd\"><?xml version=\"1.0\" ?><root></root>",
                 NonValidator,
             );
-            assert!(matches!(reader.parse(), Err(XmlError::UnexpectedToken(_))));
+            assert!(matches!(
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::UnexpectedDecl)
+            ));
         }
 
         #[test]
@@ -304,7 +337,10 @@ mod tests {
                 b"<!DOCTYPE root SYSTEM \"scheme.dtd\"><!DOCTYPE root SYSTEM \"scheme.dtd\"><root></root>",
                 NonValidator,
             );
-            assert!(matches!(reader.parse(), Err(XmlError::UnexpectedToken(_))));
+            assert!(matches!(
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::UnexpectedDocType)
+            ));
         }
     }
 }
