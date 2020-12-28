@@ -15,6 +15,14 @@ impl Error {
         Self { span, reason }
     }
 
+    /// Return whether error is caused by not well formed XML
+    pub fn is_not_wf(&self) -> bool {
+        match self.reason {
+            Reason::Io(_) => false,
+            _ => true,
+        }
+    }
+
     fn message(&self) -> String {
         match &self.reason {
             Reason::Io(err) => format!("I/O error: {:?}", err),
@@ -38,6 +46,7 @@ impl Error {
             Reason::TrailingContent => "trailing content".to_string(),
             Reason::IllegalPatternInComment => "`--` not allowed in comment".to_string(),
             Reason::PrologCharacters => "non-whitespace characters in prolog".to_string(),
+            Reason::InvalidName => "invalid XML name".to_string(),
         }
     }
 }
@@ -87,4 +96,5 @@ pub enum Reason {
     TrailingContent,
     PrologCharacters,
     IllegalPatternInComment,
+    InvalidName,
 }

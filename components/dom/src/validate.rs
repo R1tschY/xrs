@@ -1,3 +1,4 @@
+use crate::chars::XmlStrExt;
 use crate::dom::Element;
 use crate::error::{Error, Reason};
 use crate::Span;
@@ -11,7 +12,7 @@ pub trait XmlValidatorBuilder<'a> {
 }
 
 pub trait XmlValidator<'a> {
-    fn validate_start(&self, tag: &[u8], attributes: &[u8]) -> Result<(), Error>;
+    fn validate_start(&self, pos: usize, tag: &[u8], attributes: &[u8]) -> Result<(), Error>;
     fn validate_end(&self, pos: usize, tag: &[u8], element: &Element) -> Result<(), Error>;
     fn validate_comment(&self, pos: usize, comment: &[u8]) -> Result<(), Error>;
     fn validate_text(&self, text: &[u8]) -> Result<(), Error>;
@@ -28,7 +29,7 @@ impl<'a> XmlValidatorBuilder<'a> for NonValidator {
 }
 
 impl<'a> XmlValidator<'a> for NonValidator {
-    fn validate_start(&self, _tag: &[u8], _attributes: &[u8]) -> Result<(), Error> {
+    fn validate_start(&self, _pos: usize, _tag: &[u8], _attributes: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 
@@ -60,7 +61,7 @@ impl<'a> XmlValidatorBuilder<'a> for StructureValidatorBuilder {
 }
 
 impl<'a> XmlValidator<'a> for StructureValidator<'a> {
-    fn validate_start(&self, _tag: &[u8], _attributes: &[u8]) -> Result<(), Error> {
+    fn validate_start(&self, _pos: usize, _tag: &[u8], _attributes: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 
@@ -105,8 +106,17 @@ impl<'a> XmlValidatorBuilder<'a> for WellFormedValidatorBuilder {
 }
 
 impl<'a> XmlValidator<'a> for WellFormedValidator<'a> {
-    fn validate_start(&self, tag: &[u8], attributes: &[u8]) -> Result<(), Error> {
-        self.next.validate_start(tag, attributes)?;
+    fn validate_start(&self, pos: usize, tag: &[u8], attributes: &[u8]) -> Result<(), Error> {
+        self.next.validate_start(pos, tag, attributes)?;
+
+        let tag = from_utf8(tag).map_err(|err| {
+            Error::new(Span::new(pos + err.valid_up_to() + 1, 0), Reason::Utf8(err))
+        })?;
+
+        if !tag.is_xml_name() {
+            return Err(Error::new(Span::new(pos, tag.len()), Reason::InvalidName));
+        }
+
         Ok(())
     }
 

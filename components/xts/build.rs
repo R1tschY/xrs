@@ -151,6 +151,12 @@ fn process_test<W: Write>(
     // ARRANGE
     let path = base.join(&test.uri);
 
+    writeln!(
+        writer,
+        "{}/// {}",
+        indent,
+        test.description[0].replace('\n', " ")
+    )?;
     writeln!(writer, "{}#[test]", indent)?;
     if !matches!(test.ty, Type::NotWf) {
         writeln!(
@@ -179,17 +185,18 @@ fn process_test<W: Write>(
     writeln!(writer, "{}  // ACT", indent)?;
     writeln!(writer, "{}  let result = reader.parse();", indent)?;
     writeln!(writer, "{}  // ASSERT", indent)?;
+    writeln!(writer, "{}  let err = result.err();", indent)?;
     match test.ty {
         Type::Valid => (),
         Type::Invalid => (),
         Type::Error => (),
         Type::NotWf => {
-            writeln!(writer, "{}  assert!(result.is_err());", indent)?;
             writeln!(
                 writer,
-                "{}  println!(\"Error: {{:?}}\", result.err());",
+                "{}  assert_eq!(err.as_ref().map(|err| err.is_not_wf()), Some(true));",
                 indent
             )?;
+            writeln!(writer, "{}  println!(\"Error: {{:?}}\", err);", indent)?;
         }
     };
     writeln!(writer, "{}}}\n", indent)?;

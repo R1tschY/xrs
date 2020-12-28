@@ -101,8 +101,11 @@ where
         loop {
             match self.read_event(buffer)? {
                 Event::Start(start) => {
-                    self.validator
-                        .validate_start(start.name(), start.attributes_raw())?;
+                    self.validator.validate_start(
+                        self.last_offset,
+                        start.name(),
+                        start.attributes_raw(),
+                    )?;
                     stack.push(self.create_element(start));
                 }
                 Event::End(end) => {
@@ -120,8 +123,11 @@ where
                     }
                 }
                 Event::Empty(start) => {
-                    self.validator
-                        .validate_start(start.name(), start.attributes_raw())?;
+                    self.validator.validate_start(
+                        self.last_offset,
+                        start.name(),
+                        start.attributes_raw(),
+                    )?;
                     let element = self.create_element(start);
                     if stack.is_empty() {
                         return Ok(element);
@@ -190,8 +196,11 @@ where
         let root: Element = loop {
             match self.read_event(&mut buffer)? {
                 Event::Start(start) => {
-                    self.validator
-                        .validate_start(start.name(), start.attributes_raw())?;
+                    self.validator.validate_start(
+                        self.last_offset,
+                        start.name(),
+                        start.attributes_raw(),
+                    )?;
                     let root = self.create_element(start);
                     break self.parse_inner_xml(&mut buffer, root)?;
                 }
