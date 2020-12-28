@@ -206,6 +206,11 @@ where
                     break self.parse_inner_xml(&mut buffer, root)?;
                 }
                 Event::Empty(start) => {
+                    self.validator.validate_start(
+                        self.last_offset,
+                        start.name(),
+                        start.attributes_raw(),
+                    )?;
                     break self.create_element(start);
                 }
                 Event::Text(text) if text.as_ref().only_xml_whitespace() => continue,
@@ -382,6 +387,21 @@ mod tests {
             assert!(matches!(
                 reader.parse().map_err(|err| err.reason),
                 Err(Reason::UnexpectedDocType)
+            ));
+        }
+    }
+
+    mod not_well_formed {
+        use super::*;
+        use crate::error::Reason;
+        use crate::validate::WellFormedValidatorBuilder;
+
+        #[test]
+        fn invalid_tag() {
+            let reader = QuickXmlDomReader::new(b"<a#/>", WellFormedValidatorBuilder);
+            assert!(matches!(
+                reader.parse().map_err(|err| err.reason),
+                Err(Reason::InvalidName)
             ));
         }
     }

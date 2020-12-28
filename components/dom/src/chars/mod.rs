@@ -91,6 +91,16 @@ mod tests {
         }
 
         #[test]
+        fn at() {
+            assert_eq!(false, "A@".is_xml_name());
+        }
+
+        #[test]
+        fn hashtag() {
+            assert_eq!(false, "A#".is_xml_name());
+        }
+
+        #[test]
         fn without_namespace() {
             assert_eq!(true, "type67".is_xml_name());
         }
