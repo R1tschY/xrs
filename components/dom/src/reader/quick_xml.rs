@@ -138,7 +138,8 @@ where
                 }
                 Event::Text(text) => {
                     if text.len() > 0 {
-                        self.validator.validate_text(text.escaped())?;
+                        self.validator
+                            .validate_text(self.last_offset, text.escaped())?;
 
                         let stack_len = stack.len();
                         let top = &mut stack[stack_len - 1];

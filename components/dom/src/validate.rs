@@ -15,7 +15,7 @@ pub trait XmlValidator<'a> {
     fn validate_start(&self, pos: usize, tag: &[u8], attributes: &[u8]) -> Result<(), Error>;
     fn validate_end(&self, pos: usize, tag: &[u8], element: &Element) -> Result<(), Error>;
     fn validate_comment(&self, pos: usize, comment: &[u8]) -> Result<(), Error>;
-    fn validate_text(&self, text: &[u8]) -> Result<(), Error>;
+    fn validate_text(&self, pos: usize, text: &[u8]) -> Result<(), Error>;
 }
 
 pub struct NonValidator;
@@ -41,7 +41,7 @@ impl<'a> XmlValidator<'a> for NonValidator {
         Ok(())
     }
 
-    fn validate_text(&self, _text: &[u8]) -> Result<(), Error> {
+    fn validate_text(&self, _pos: usize, _text: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -84,7 +84,7 @@ impl<'a> XmlValidator<'a> for StructureValidator<'a> {
         Ok(())
     }
 
-    fn validate_text(&self, _text: &[u8]) -> Result<(), Error> {
+    fn validate_text(&self, _pos: usize, _text: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -109,11 +109,17 @@ impl<'a> XmlValidator<'a> for WellFormedValidator<'a> {
     fn validate_start(&self, pos: usize, tag: &[u8], attributes: &[u8]) -> Result<(), Error> {
         self.next.validate_start(pos, tag, attributes)?;
 
-        let tag = from_utf8(tag).map_err(|err| {
+        let tag_str = from_utf8(tag).map_err(|err| {
             Error::new(Span::new(pos + err.valid_up_to() + 1, 0), Reason::Utf8(err))
         })?;
+        from_utf8(attributes).map_err(|err| {
+            Error::new(
+                Span::new(pos + tag.len() + err.valid_up_to() + 1, 0),
+                Reason::Utf8(err),
+            )
+        })?;
 
-        if !tag.is_xml_name() {
+        if !tag_str.is_xml_name() {
             return Err(Error::new(Span::new(pos, tag.len()), Reason::InvalidName));
         }
 
@@ -128,6 +134,13 @@ impl<'a> XmlValidator<'a> for WellFormedValidator<'a> {
     fn validate_comment(&self, pos: usize, comment: &[u8]) -> Result<(), Error> {
         self.next.validate_comment(pos, comment)?;
 
+        from_utf8(comment).map_err(|err| {
+            Error::new(
+                Span::new(pos + 4 + err.valid_up_to() + 1, 0),
+                Reason::Utf8(err),
+            )
+        })?;
+
         for i in memchr::memchr_iter(b'-', comment) {
             if i + 1 != comment.len() && comment[i + 1] == b'-' {
                 let span = Span::new(pos + 4 + i, 2);
@@ -138,8 +151,13 @@ impl<'a> XmlValidator<'a> for WellFormedValidator<'a> {
         Ok(())
     }
 
-    fn validate_text(&self, text: &[u8]) -> Result<(), Error> {
-        self.next.validate_text(text)?;
+    fn validate_text(&self, pos: usize, text: &[u8]) -> Result<(), Error> {
+        self.next.validate_text(pos, text)?;
+
+        from_utf8(text).map_err(|err| {
+            Error::new(Span::new(pos + err.valid_up_to() + 1, 0), Reason::Utf8(err))
+        })?;
+
         Ok(())
     }
 }
