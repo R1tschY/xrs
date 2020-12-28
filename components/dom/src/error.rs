@@ -1,3 +1,4 @@
+use crate::Span;
 use std::fmt::Formatter;
 use std::str::Utf8Error;
 use std::{fmt, io};
@@ -5,24 +6,17 @@ use std::{fmt, io};
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Error {
-    offset: usize,
-    length: usize,
+    span: Span,
     pub(crate) reason: Reason,
 }
 
 impl Error {
-    pub fn new(offset: usize, length: usize, reason: Reason) -> Self {
-        Self {
-            offset,
-            length,
-            reason,
-        }
+    pub fn new(span: Span, reason: Reason) -> Self {
+        Self { span, reason }
     }
-}
 
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match &self.reason {
+    fn message(&self) -> String {
+        match &self.reason {
             Reason::Io(err) => format!("I/O error: {:?}", err),
             Reason::Utf8(err) => format!("UTF-8 error: {:?}", err),
             Reason::UnexpectedEof => "unexpected end of file".to_string(),
@@ -42,13 +36,35 @@ impl fmt::Debug for Error {
             Reason::UnexpectedDocType => "unexpected doctype".to_string(),
             Reason::UnexpectedDecl => "xml decl not at start of file".to_string(),
             Reason::TrailingContent => "trailing content".to_string(),
-        };
+            Reason::IllegalPatternInComment => "`--` not allowed in comment".to_string(),
+            Reason::PrologCharacters => "non-whitespace characters in prolog".to_string(),
+        }
+    }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Error")
-            .field("offset", &self.offset)
-            .field("message", &message)
+            .field("offset", &self.span.start)
+            .field("length", &self.span.len)
+            .field("message", &self.message())
             .finish()
     }
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} at offset {} with length {}",
+            self.message(),
+            self.span.start,
+            self.span.len
+        )
+    }
+}
+
+impl std::error::Error for Error {}
 
 pub enum Reason {
     // general
@@ -69,4 +85,6 @@ pub enum Reason {
     UnexpectedDocType,
     UnexpectedDecl,
     TrailingContent,
+    PrologCharacters,
+    IllegalPatternInComment,
 }

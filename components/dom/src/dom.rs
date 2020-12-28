@@ -102,6 +102,6 @@ impl Element {
     }
 
     pub fn push_tail(&mut self, span: Span) {
-        self.text = span; // TODO
+        self.tail = span; // TODO
     }
 }

@@ -173,7 +173,7 @@ fn process_test<W: Write>(
     )?;
     writeln!(
         writer,
-        "{}  let reader = QuickXmlDomReader::new(&content, NonValidator);",
+        "{}  let reader = QuickXmlDomReader::new(&content, WellFormedValidatorBuilder);",
         indent
     )?;
     writeln!(writer, "{}  // ACT", indent)?;
@@ -250,7 +250,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "use xml_dom::reader::quick_xml::QuickXmlDomReader;"
     )?;
     writeln!(&mut writer, "use xml_dom::reader::DomReader;")?;
-    writeln!(&mut writer, "use xml_dom::validate::NonValidator;")?;
+    writeln!(
+        &mut writer,
+        "use xml_dom::validate::WellFormedValidatorBuilder;"
+    )?;
     writeln!(&mut writer, "use std::fs;")?;
     writeln!(&mut writer, "")?;
     process_test_cases(&mut writer, &test_suite.test_cases, "", &base_dir)?;
