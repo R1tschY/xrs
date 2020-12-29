@@ -76,7 +76,7 @@ impl<'a> XmlValidator<'a> for StructureValidator<'a> {
     }
 
     fn validate_end(&self, pos: usize, tag: &[u8], element: &Element) -> Result<(), Error> {
-        let start_tag = element.tag_bytes(self.doc);
+        let start_tag = element.tag_span().to_slice(self.doc);
         if tag != start_tag {
             Err(Error::new(
                 Span::new(pos + 2, tag.len()),

@@ -1,3 +1,4 @@
+use crate::error::{Error, Reason, Result};
 use crate::Span;
 use std::str::{from_utf8, Utf8Error};
 
@@ -26,6 +27,11 @@ pub struct Element {
     namespaces: Option<Vec<(Span, Span)>>,
 }
 
+fn decode(span: Span, doc: &[u8]) -> Result<&str> {
+    span.to_str(doc)
+        .map_err(|err| Error::new(span, Reason::Utf8(err)))
+}
+
 impl Element {
     // new
 
@@ -43,16 +49,12 @@ impl Element {
 
     // tag
 
-    pub fn tag<'a>(&self, doc: &'a Document) -> Result<&'a str, Utf8Error> {
-        from_utf8(self.tag.to_slice(doc.bytes))
+    pub fn tag<'a>(&self, doc: &Document<'a>) -> Result<&'a str> {
+        decode(self.tag, doc.bytes)
     }
 
     pub fn tag_span(&self) -> Span {
         self.tag
-    }
-
-    pub(crate) fn tag_bytes<'a>(&self, doc: &'a [u8]) -> &'a [u8] {
-        self.tag.to_slice(doc)
     }
 
     // children
@@ -68,23 +70,23 @@ impl Element {
     // text / tail
 
     #[inline]
-    pub fn text<'a>(&self, doc: &'a Document) -> Result<&'a str, Utf8Error> {
-        self.text.to_str(doc.bytes)
+    pub fn text<'a>(&self, doc: &Document<'a>) -> Result<&'a str> {
+        decode(self.text, doc.bytes)
     }
 
     #[inline]
-    pub fn tail<'a>(&self, doc: &'a Document) -> Result<&'a str, Utf8Error> {
-        self.tail.to_str(doc.bytes)
+    pub fn tail<'a>(&self, doc: &Document<'a>) -> Result<&'a str> {
+        decode(self.tail, doc.bytes)
     }
 
     #[inline]
-    pub fn text_from_docbytes<'a>(&self, doc: &'a [u8]) -> Result<&'a str, Utf8Error> {
-        self.text.to_str(doc)
+    pub fn text_from_docbytes<'a>(&self, doc: &'a [u8]) -> Result<&'a str> {
+        decode(self.text, doc)
     }
 
     #[inline]
-    pub fn tail_from_docbytes<'a>(&self, doc: &'a [u8]) -> Result<&'a str, Utf8Error> {
-        self.tail.to_str(doc)
+    pub fn tail_from_docbytes<'a>(&self, doc: &'a [u8]) -> Result<&'a str> {
+        decode(self.tail, doc)
     }
 
     pub fn has_text(&self) -> bool {

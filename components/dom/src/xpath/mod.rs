@@ -1,6 +1,10 @@
 use crate::dom::{Document, Element};
 use crate::error::{Error, Reason, Result};
 use crate::Span;
+use std::borrow::Cow;
+
+mod selectors;
+mod types;
 
 enum Axis {
     Ancestor,
@@ -39,55 +43,18 @@ struct XPath {
     steps: Vec<LocationStep>,
 }
 
-trait Selector {
-    fn select<'a, 'b, 'c, T: Iterator<Item = &'a Element> + 'a>(
-        &'a self,
-        iter: T,
-        doc: &'b Document<'c>,
-    ) -> Box<dyn Iterator<Item = Result<&'a Element>> + 'a>
-    where
-        'b: 'a;
+pub(crate) trait XPathDomExt {
+    fn text_value<'a>(&self, doc: &'a Document) -> Result<Cow<'a, str>>;
 }
 
-struct AnyChild;
-
-impl Selector for AnyChild {
-    fn select<'a, 'b, 'c, T: Iterator<Item = &'a Element> + 'a>(
-        &'a self,
-        iter: T,
-        doc: &'b Document<'c>,
-    ) -> Box<dyn Iterator<Item = Result<&'a Element>> + 'a>
-    where
-        'b: 'a,
-    {
-        Box::new(iter.flat_map(|elem| elem.children().iter().map(Ok)))
-    }
-}
-
-struct ChildWithName(String);
-
-impl Selector for ChildWithName {
-    fn select<'a, 'b, 'c, T: Iterator<Item = &'a Element> + 'a>(
-        &'a self,
-        iter: T,
-        doc: &'b Document<'c>,
-    ) -> Box<dyn Iterator<Item = Result<&'a Element>> + 'a>
-    where
-        'b: 'a,
-    {
-        Box::new(iter.flat_map(move |elem| {
-            elem.children()
-                .iter()
-                .filter_map(move |child| match child.tag(doc) {
-                    Ok(tag) => {
-                        if tag == self.0 {
-                            Some(Ok(child))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(err) => Some(Err(Error::new(child.tag_span(), Reason::Utf8(err)))),
-                })
-        }))
+impl XPathDomExt for Element {
+    fn text_value<'a>(&self, doc: &'a Document) -> Result<Cow<'a, str>> {
+        let mut result = Cow::from(self.text(doc)?);
+        for child in self.children() {
+            if child.has_tail() {
+                result.to_mut().push_str(child.tail(doc)?);
+            }
+        }
+        Ok(result)
     }
 }
