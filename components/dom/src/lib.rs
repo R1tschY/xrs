@@ -12,6 +12,7 @@ pub mod dom;
 pub mod error;
 pub mod reader;
 pub mod validate;
+pub mod xpath;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Span {

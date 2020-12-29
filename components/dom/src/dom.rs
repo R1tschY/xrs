@@ -47,6 +47,10 @@ impl Element {
         from_utf8(self.tag.to_slice(doc.bytes))
     }
 
+    pub fn tag_span(&self) -> Span {
+        self.tag
+    }
+
     pub(crate) fn tag_bytes<'a>(&self, doc: &'a [u8]) -> &'a [u8] {
         self.tag.to_slice(doc)
     }
