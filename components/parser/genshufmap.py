@@ -13,7 +13,6 @@ cats = [
     Cat(chars="&;", bit=2),
     Cat(chars="\"", bit=3),
     Cat(chars="=", bit=4),
-    Cat(chars="=", bit=5),
 ]
 
 low_mask = [0] * 16
@@ -25,6 +24,6 @@ for cat in cats:
         high_mask[ord(c) >> 4] |= (1 << cat.bit)
 
 
-print(f"low_mask = {low_mask}")
-print(f"high_mask = {high_mask}")
+print(f"low_mask = {', '.join([hex(x) for x in low_mask])}")
+print(f"high_mask = {', '.join([hex(x) for x in high_mask])}")
 

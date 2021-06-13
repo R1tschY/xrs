@@ -14,14 +14,14 @@ pub struct SSEInput {
     // v3: m128,
 }
 
-fn m128i_as_slice(v: m128i) -> [u8; 16] {
+fn m128i_as_slice(v: &m128i) -> &[u8; 16] {
     unsafe { transmute(v) }
 }
 
 fn format_m128_chars(prefix: &str, v: m128i) {
     unsafe {
         print!("{:12}: ", prefix);
-        for b in &m128i_as_slice(v) {
+        for b in m128i_as_slice(&v) {
             if b.is_ascii_graphic() {
                 print!(" {} ", char::from(*b));
             } else {
@@ -35,7 +35,7 @@ fn format_m128_chars(prefix: &str, v: m128i) {
 fn format_m128_bytes(prefix: &str, v: m128i) {
     unsafe {
         print!("{:12}: ", prefix);
-        for b in &m128i_as_slice(v) {
+        for b in m128i_as_slice(&v) {
             print!("{:02x} ", b);
         }
         println!()
@@ -70,13 +70,14 @@ impl SSEInput {
     /// shufti algorithm stealed from hyperscan
     fn scan_whitespace(&self) -> u64 {
         unsafe {
-            let low_nibble_mask: __m128i =
-                _mm_setr_epi8(0b01, 0, 0, 0, 0, 0, 0, 0, 0, 0b01, 0b01, 0, 0, 0b01, 0, 0);
-            let high_nibble_mask: __m128i =
-                _mm_setr_epi8(0b01, 0, 0b01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            let low_nibble_mask: __m128i = _mm_setr_epi8(
+                0x1, 0x0, 0x8, 0x0, 0x0, 0x0, 0x4, 0x0, 0x0, 0x1, 0x1, 0x4, 0x2, 0x11, 0x2, 0x0,
+            );
+            let high_nibble_mask: __m128i = _mm_setr_epi8(
+                0x1, 0x0, 0xd, 0x16, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+            );
 
-            let whitespace_shufti_mask: __m128i = _mm_set1_epi8(0b01);
-            let whitespace_shufti_mask: __m128i = _mm_set1_epi8(0b01);
+            let shufti_mask: __m128i = _mm_set1_epi8(0b1000);
 
             format_m128_bytes("self.v0", self.v0);
             let v_v0: __m128i = _mm_and_si128(
@@ -95,10 +96,8 @@ impl SSEInput {
                 ),
             );
             format_m128_bytes("v_v0", v_v0);
-            let tmp_ws_v0: __m128i = _mm_cmpeq_epi8(
-                _mm_and_si128(v_v0, whitespace_shufti_mask),
-                _mm_set1_epi8(0),
-            );
+            let tmp_ws_v0: __m128i =
+                _mm_cmpeq_epi8(_mm_and_si128(v_v0, shufti_mask), _mm_set1_epi8(0));
             format_m128_bytes("tmp_ws_v0", tmp_ws_v0);
             format_bits("result", _mm_movemask_epi8(tmp_ws_v0));
             _mm_movemask_epi8(tmp_ws_v0) as u64
