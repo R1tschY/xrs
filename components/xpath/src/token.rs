@@ -77,9 +77,16 @@ impl<'a> LexCursor<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct Ident {
     sym: String,
     span: Span,
+}
+
+impl Ident {
+    pub fn as_str(&self) -> &str {
+        &self.sym
+    }
 }
 
 impl fmt::Display for Ident {
@@ -94,6 +101,7 @@ impl fmt::Debug for Ident {
     }
 }
 
+#[derive(Clone)]
 pub struct Literal {
     value: String,
     span: Span,
@@ -111,6 +119,7 @@ impl fmt::Debug for Literal {
     }
 }
 
+#[derive(Clone)]
 pub struct Number {
     value: f64,
     span: Span,
@@ -128,16 +137,17 @@ impl fmt::Debug for Number {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Spacing {
     Joined,
     Alone,
 }
 
+#[derive(Clone)]
 pub struct Punct {
-    ch: char,
-    spacing: Spacing,
-    span: Span,
+    pub ch: char,
+    pub spacing: Spacing,
+    pub span: Span,
 }
 
 impl fmt::Debug for Punct {
@@ -157,6 +167,14 @@ impl Punct {
             span,
         }
     }
+
+    pub fn as_char(&self) -> char {
+        self.ch
+    }
+
+    pub fn spacing(&self) -> Spacing {
+        self.spacing
+    }
 }
 
 impl fmt::Display for Punct {
@@ -165,14 +183,7 @@ impl fmt::Display for Punct {
     }
 }
 
-#[derive(Debug)]
-enum Delimiter {
-    /// `( ... )`
-    Parenthesis,
-    /// `[ ... ]`
-    Bracket,
-}
-
+#[derive(Clone)]
 pub enum Token {
     Ident(Ident),
     Literal(Literal),
@@ -218,6 +229,10 @@ impl IntoIterator for Tokens {
 impl Tokens {
     pub fn len(&self) -> usize {
         self.tokens.len()
+    }
+
+    pub fn as_slice(&self) -> &[Token] {
+        self.tokens.as_slice()
     }
 }
 

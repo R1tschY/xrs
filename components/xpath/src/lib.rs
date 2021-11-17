@@ -2,7 +2,7 @@ mod ast;
 mod characters;
 mod token;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Span {
     lo: usize,
     hi: usize,
