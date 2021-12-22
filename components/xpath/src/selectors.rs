@@ -1,13 +1,12 @@
-use crate::dom::{Document, Element};
-use crate::error;
-use crate::error::{Error, Reason};
+use crate::XPathError;
+use xml_dom::{Document, Element};
 
 pub trait Selector {
     fn select<'a, 'b, 'c, T: Iterator<Item = &'a Element> + 'a>(
         &'a self,
         iter: T,
         doc: &'b Document<'c>,
-    ) -> Box<dyn Iterator<Item = error::Result<&'a Element>> + 'a>
+    ) -> Box<dyn Iterator<Item = Result<&'a Element, XPathError>> + 'a>
     where
         'b: 'a;
 }
@@ -19,7 +18,7 @@ impl Selector for AnyChild {
         &'a self,
         iter: T,
         doc: &'b Document<'c>,
-    ) -> Box<dyn Iterator<Item = error::Result<&'a Element>> + 'a>
+    ) -> Box<dyn Iterator<Item = Result<&'a Element, XPathError>> + 'a>
     where
         'b: 'a,
     {
@@ -34,7 +33,7 @@ impl Selector for ChildWithName {
         &'a self,
         iter: T,
         doc: &'b Document<'c>,
-    ) -> Box<dyn Iterator<Item = error::Result<&'a Element>> + 'a>
+    ) -> Box<dyn Iterator<Item = Result<&'a Element, XPathError>> + 'a>
     where
         'b: 'a,
     {

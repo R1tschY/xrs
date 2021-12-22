@@ -1,18 +1,19 @@
-use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
-use quick_xml::{Error as XmlError, Error};
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::str::{from_utf8, Utf8Error};
 
+use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
+use quick_xml::{Error as XmlError, Error};
+
+pub use dom::{Document, Element};
+
 use self::chars::*;
-use dom::{Document, Element};
 
 pub mod chars;
 pub mod dom;
 pub mod error;
 pub mod reader;
 pub mod validate;
-pub mod xpath;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Span {

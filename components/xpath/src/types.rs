@@ -1,5 +1,5 @@
-use crate::dom::Element;
 use std::borrow::Cow;
+use xml_dom::Element;
 
 enum Object<'a> {
     Number(f64),
