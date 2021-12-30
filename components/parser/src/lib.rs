@@ -1,7 +1,9 @@
 #![allow(unused)]
 
+use std::fmt::Formatter;
 use std::fs::read_to_string;
-use std::io;
+use std::str::from_utf8;
+use std::{fmt, io};
 
 use crate::XmlError::{ExpectedElementEnd, ExpectedName};
 
@@ -13,10 +15,22 @@ pub struct STagStart<'a> {
     name: &'a [u8],
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Attribute<'a> {
     name: &'a [u8],
     value: &'a [u8],
+}
+
+impl<'a> fmt::Debug for Attribute<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = from_utf8(self.name).unwrap();
+        let value = from_utf8(self.value).unwrap();
+
+        f.debug_struct("Attribute")
+            .field("name", &name)
+            .field("value", &value)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +81,7 @@ pub enum XmlError {
     ExpectedElementEnd,
     ExpectedAttrName,
     ExpectedAttrValue,
+    ExpectedEquals,
     UnexpectedEof,
 }
 
@@ -145,9 +160,11 @@ impl<'a> Reader<'a> {
     fn scan_attr_value(&mut self) -> Result<&'a [u8], XmlError> {
         while let Some(c) = self.input.get(self.pos) {
             if *c == b'"' {
-                let start = self.pos + 1;
+                self.pos += 1;
+                let start = self.pos;
                 while let Some(c) = self.input.get(self.pos) {
                     if *c == b'"' {
+                        self.pos += 1;
                         return Ok(&self.input[start..self.pos - 1]);
                     }
                     self.pos += 1;
@@ -155,9 +172,11 @@ impl<'a> Reader<'a> {
                 return Err(XmlError::ExpectedAttrValue);
             }
             if *c == b'\'' {
-                let start = self.pos + 1;
+                self.pos += 1;
+                let start = self.pos;
                 while let Some(c) = self.input.get(self.pos) {
                     if *c == b'\'' {
+                        self.pos += 1;
                         return Ok(&self.input[start..self.pos - 1]);
                     }
                     self.pos += 1;
@@ -177,7 +196,9 @@ impl<'a> Reader<'a> {
     fn scan_attr_name(&mut self) -> Result<usize, XmlError> {
         while let Some(c) = self.input.get(self.pos) {
             if *c == b'=' {
-                return Ok(self.pos);
+                let end = self.pos;
+                self.pos += 1;
+                return Ok(end);
             }
             if is_whitespace(*c) {
                 let end = self.pos;
@@ -187,7 +208,7 @@ impl<'a> Reader<'a> {
                         return Ok(end);
                     }
                     if !is_whitespace(*c) {
-                        return Err(XmlError::ExpectedElementEnd);
+                        return Err(XmlError::ExpectedEquals);
                     }
                     self.pos += 1;
                 }
@@ -201,6 +222,8 @@ impl<'a> Reader<'a> {
 
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         if self.in_element {
+            self.skip_whitespace();
+
             if let Some(c) = self.input.get(self.pos) {
                 if *c == b'/' {
                     self.pos += 1;
@@ -217,13 +240,14 @@ impl<'a> Reader<'a> {
                     self.in_element = false;
                     return Ok(Some(XmlEvent::STagEnd));
                 }
-            }
 
-            while let Some(c) = self.input.get(self.pos) {
                 let name_start = self.pos;
                 let name_end = self.scan_attr_name()?;
                 let value = self.scan_attr_value()?;
-                todo!()
+                return Ok(Some(XmlEvent::Attribute(Attribute {
+                    name: &self.input[name_start..name_end],
+                    value,
+                })));
             }
         }
 
@@ -308,8 +332,7 @@ mod tests {
         let mut reader = Reader::new(b"<elem attr=\"value\"/>");
         assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
         assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
-        assert_evt!(Ok(Some(XmlEvent::stag_end())), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag(b"elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }
 
@@ -318,8 +341,25 @@ mod tests {
         let mut reader = Reader::new(b"<elem   attr  =  \"value\"  />");
         assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
         assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
-        assert_evt!(Ok(Some(XmlEvent::stag_end())), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag(b"elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
+        assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn single_quote_attribute() {
+        let mut reader = Reader::new(b"<elem attr='value'/>");
+        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
+        assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn single_quote_attribute_whitespace() {
+        let mut reader = Reader::new(b"<elem   attr  =  'value'  />");
+        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }
 }
