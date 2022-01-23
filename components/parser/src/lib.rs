@@ -21,6 +21,16 @@ pub struct Attribute<'a> {
     value: &'a [u8],
 }
 
+impl<'a> Attribute<'a> {
+    pub fn value(&self) -> &str {
+        from_utf8(self.value).unwrap()
+    }
+
+    pub fn name(&self) -> &str {
+        from_utf8(self.name).unwrap()
+    }
+}
+
 impl<'a> fmt::Debug for Attribute<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = from_utf8(self.name).unwrap();
@@ -38,9 +48,21 @@ pub struct STagEnd<'a> {
     name: &'a [u8],
 }
 
+impl<'a> STagEnd<'a> {
+    pub fn name(&self) -> &str {
+        from_utf8(self.name).unwrap()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ETag<'a> {
     name: &'a [u8],
+}
+
+impl<'a> ETag<'a> {
+    pub fn name(&self) -> &str {
+        from_utf8(self.name).unwrap()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

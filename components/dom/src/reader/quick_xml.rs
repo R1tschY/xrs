@@ -146,20 +146,8 @@ where
                         let span = Span::new(self.last_offset, text.len());
                         let children_len = top.children().len();
                         if children_len == 0 {
-                            debug_assert!(
-                                !top.has_text(),
-                                "tried to reassign text {:?} with {:?}",
-                                top.text_from_docbytes(self.bytes).unwrap(),
-                                from_utf8(span.to_slice(self.bytes)).unwrap()
-                            );
                             top.push_text(span);
                         } else {
-                            debug_assert!(
-                                !top.children()[children_len - 1].has_tail(),
-                                "tried to reassign tail {:?} with {:?}",
-                                top.tail_from_docbytes(self.bytes).unwrap(),
-                                from_utf8(span.to_slice(self.bytes)).unwrap()
-                            );
                             top.children_mut()[children_len - 1].push_tail(span);
                         }
                     }

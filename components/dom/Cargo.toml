@@ -9,3 +9,6 @@ edition = "2018"
 [dependencies]
 quick-xml = "^0.20.0"
 memchr = "^2.3.4"
+
+[dev-dependencies]
+xml-xts = { path = "../xts" }
