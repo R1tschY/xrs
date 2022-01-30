@@ -45,10 +45,10 @@ struct Test {
     id: String,
 
     #[serde(rename = "@OUTPUT", default)]
-    output: String,
+    output: Option<String>,
 
     #[serde(rename = "@OUTPUT3", default)]
-    output3: String,
+    output3: Option<String>,
 
     #[serde(rename = "@SECTIONS")]
     sections: String,
@@ -60,7 +60,7 @@ struct Test {
     ty: Type,
 
     #[serde(rename = "@VERSION", default)]
-    version: String,
+    version: Option<String>,
 
     #[serde(rename = "@EDITION", default)]
     edition: String,
@@ -165,7 +165,7 @@ impl Default for Recommendation {
 
 pub trait TestableParser {
     fn is_wf(&self, input: &[u8]) -> bool;
-    fn canonxml(&self, input: &[u8]) -> String;
+    fn canonxml(&self, input: &[u8]) -> Result<String, Box<dyn Debug>>;
 }
 
 pub struct XmlTester {
@@ -204,7 +204,6 @@ impl XmlTester {
         for tc in tcs {
             let next_base = base.join(&tc.base);
             println!("// Test case: {} {}", tc.base, tc.profile);
-            println!("PROFILE: {}", tc.profile);
 
             let mut subreport = XmlConfirmReport::new(&tc.profile);
             self.process_test_cases(&mut subreport, parser, &tc.test_cases, &next_base);
@@ -232,25 +231,35 @@ impl XmlTester {
         test: &Test,
         base: &Path,
     ) {
+        println!("##   Test case: {} {}", test.id, test.uri);
         let path = base.join(&test.uri);
-
-        println!(
-            "TEST: {}: {} ({:?})",
-            test.id,
-            test.description[0].replace('\n', " "),
-            path
-        );
         let content = fs::read(path).unwrap();
-        let success = match test.ty {
-            Type::Valid => return,
-            Type::Invalid => return,
+        let mut success = match test.ty {
+            Type::Valid => parser.is_wf(&content),
+            Type::Invalid => parser.is_wf(&content),
             Type::Error => return,
             Type::NotWf => !parser.is_wf(&content),
         };
+        if let Some(output) = &test.output {
+            match parser.canonxml(&content) {
+                Ok(out) => {
+                    let out_path = base.join(&output);
+                    let out_content = fs::read(out_path).unwrap();
+                    if out.as_bytes() != out_content {
+                        success = false;
+                    }
+                }
+                Err(_err) => {
+                    success = false;
+                }
+            }
+        }
+
         report.test_count += 1;
         if !success {
             report.failed.push(XmlTestFailure {
                 name: test.uri.to_string(),
+                description: test.description[0].replace('\n', " "),
             });
         }
 
@@ -265,6 +274,7 @@ impl XmlTester {
 
 pub struct XmlTestFailure {
     pub name: String,
+    pub description: String,
 }
 
 #[derive(Clone)]

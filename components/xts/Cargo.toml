@@ -10,3 +10,6 @@ edition = "2018"
 serde = { version = "1.0", features = ["derive"] }
 serde-explicit-xml = { git = "https://github.com/R1tschY/serde_xml_adapt.git", rev = "43be503a7de3"}
 xml-dom = { path = "../dom" }
+
+[dev-dependencies]
+quick-xml = "0.22"
