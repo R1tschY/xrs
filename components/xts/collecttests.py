@@ -1,6 +1,6 @@
-import sys
 from pathlib import Path
-from lxml.etree import ElementTree, fromstring, parse, XMLParser, tostring
+
+from lxml.etree import parse, tostring
 
 with (Path(__file__).parent / "xmlts20130923" / "xmlconf" / "xmlconf.xml").open("r") as fp:
     tree = parse(fp)

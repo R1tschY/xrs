@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -74,7 +75,7 @@ struct Test {
     description: Vec<String>,
 }
 
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
 enum YesNo {
     #[serde(rename = "yes")]
     Yes,
@@ -105,8 +106,8 @@ impl From<YesNo> for bool {
     }
 }
 
-#[derive(Deserialize, Debug)]
-enum Type {
+#[derive(Deserialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
+pub enum Type {
     #[serde(rename = "valid")]
     Valid,
     #[serde(rename = "invalid")]
@@ -117,7 +118,7 @@ enum Type {
     Error,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
 enum Entities {
     #[serde(rename = "both")]
     Both,
@@ -135,7 +136,7 @@ impl Default for Entities {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Hash, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 enum Recommendation {
     #[serde(rename = "XML1.0")]
@@ -163,7 +164,7 @@ impl Default for Recommendation {
 }
 
 pub trait TestableParser {
-    fn check_wf(&self, input: &[u8]) -> bool;
+    fn is_wf(&self, input: &[u8]) -> bool;
     fn canonxml(&self, input: &[u8]) -> String;
 }
 
@@ -173,62 +174,188 @@ pub struct XmlTester {
 
 impl XmlTester {
     pub fn new() -> Self {
-        let xmlts_root = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("../../../../components/xts/xmlts20130923/xmlconf")
-            .canonicalize()
-            .unwrap();
-        Self { xmlts_root }
-    }
-
-    pub fn test(&self, parser: &dyn TestableParser) {
-        let file = File::open(self.xmlts_root.join("xmlconf.complete.xml")).unwrap();
-        let test_suite: TestSuite = from_reader(BufReader::new(file)).unwrap();
-
-        println!("PROFILE: {}", &test_suite.profile);
-        self.process_test_cases(parser, &test_suite.test_cases, &self.xmlts_root);
-    }
-
-    fn process_test_cases(&self, parser: &dyn TestableParser, tcs: &[TestCases], base: &Path) {
-        for tc in tcs {
-            let next_base = base.join(&tc.base);
-            println!("// Test case: {} {}", tc.base, tc.profile);
-
-            let mut id = tc.base.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-            if id.is_empty() {
-                id = tc
-                    .profile
-                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
-                    .to_string();
-            }
-
-            println!("PROFILE: {}", tc.profile);
-            println!("TEST: {}", id);
-
-            self.process_test_cases(parser, &tc.test_cases, &next_base);
-
-            for test in &tc.tests {
-                self.process_test(parser, test, &next_base);
-            }
+        Self {
+            xmlts_root: Path::new(env!("CARGO_MANIFEST_DIR")).join("xmlts20130923/xmlconf"),
         }
     }
 
-    fn process_test(&self, parser: &dyn TestableParser, test: &Test, base: &Path) {
+    pub fn test(&self, parser: &dyn TestableParser) -> XmlConfirmReport {
+        let file = File::open(self.xmlts_root.join("xmlconf.complete.xml")).unwrap();
+        let test_suite: TestSuite = from_reader(BufReader::new(file)).unwrap();
+        let mut report = XmlConfirmReport::new(&test_suite.profile);
+
+        println!("PROFILE: {}", &test_suite.profile);
+        self.process_test_cases(
+            &mut report,
+            parser,
+            &test_suite.test_cases,
+            &self.xmlts_root,
+        );
+        report
+    }
+
+    fn process_test_cases(
+        &self,
+        report: &mut XmlConfirmReport,
+        parser: &dyn TestableParser,
+        tcs: &[TestCases],
+        base: &Path,
+    ) {
+        for tc in tcs {
+            let next_base = base.join(&tc.base);
+            println!("// Test case: {} {}", tc.base, tc.profile);
+            println!("PROFILE: {}", tc.profile);
+
+            let mut subreport = XmlConfirmReport::new(&tc.profile);
+            self.process_test_cases(&mut subreport, parser, &tc.test_cases, &next_base);
+
+            for test in &tc.tests {
+                self.process_test(&mut subreport, parser, test, &next_base);
+            }
+
+            report.statistic.merge_with(&subreport.statistic);
+            for (ty, ty_stat) in &subreport.type_statistic {
+                report
+                    .type_statistic
+                    .entry(ty.clone())
+                    .and_modify(|s| s.merge_with(ty_stat))
+                    .or_insert(ty_stat.clone());
+            }
+            report.subtests.push(subreport);
+        }
+    }
+
+    fn process_test(
+        &self,
+        report: &mut XmlConfirmReport,
+        parser: &dyn TestableParser,
+        test: &Test,
+        base: &Path,
+    ) {
         let path = base.join(&test.uri);
 
         println!(
-            "TEST: {}: {}",
+            "TEST: {}: {} ({:?})",
             test.id,
-            test.description[0].replace('\n', " ")
+            test.description[0].replace('\n', " "),
+            path
         );
         let content = fs::read(path).unwrap();
-        match test.ty {
-            Type::Valid => (),
-            Type::Invalid => (),
-            Type::Error => (),
-            Type::NotWf => assert!(parser.check_wf(&content), "FAILED: {}", test.id),
+        let success = match test.ty {
+            Type::Valid => return,
+            Type::Invalid => return,
+            Type::Error => return,
+            Type::NotWf => !parser.is_wf(&content),
         };
+        report.test_count += 1;
+        if !success {
+            report.failed.push(XmlTestFailure {
+                name: test.uri.to_string(),
+            });
+        }
+
+        report.statistic.inc_result(success);
+        report
+            .type_statistic
+            .entry(test.ty)
+            .and_modify(|s| s.inc_result(success))
+            .or_default();
+    }
+}
+
+pub struct XmlTestFailure {
+    pub name: String,
+}
+
+#[derive(Clone)]
+pub struct TestStatistic {
+    failed: usize,
+    count: usize,
+}
+
+impl TestStatistic {
+    pub fn inc_result(&mut self, success: bool) {
+        self.count += 1;
+        if !success {
+            self.failed += 1;
+        }
+    }
+
+    pub fn merge_with(&mut self, other: &TestStatistic) {
+        self.failed += other.failed;
+        self.count += other.count;
+    }
+}
+
+impl Default for TestStatistic {
+    fn default() -> Self {
+        Self {
+            failed: 0,
+            count: 0,
+        }
+    }
+}
+
+pub struct XmlConfirmReport {
+    pub name: String,
+    pub failed: Vec<XmlTestFailure>,
+    pub test_count: usize,
+
+    pub subtests: Vec<XmlConfirmReport>,
+
+    pub statistic: TestStatistic,
+    pub type_statistic: HashMap<Type, TestStatistic>,
+}
+
+impl XmlConfirmReport {
+    fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            failed: Vec::new(),
+            test_count: 0,
+            subtests: Vec::new(),
+            statistic: TestStatistic::default(),
+            type_statistic: HashMap::default(),
+        }
+    }
+
+    pub fn assert(&self) {
+        assert_eq!(
+            0, self.statistic.failed,
+            "There are {} failed tests from {}",
+            self.statistic.failed, self.statistic.count,
+        );
+    }
+
+    pub fn print(&self) {
+        let mut res = String::new();
+        self.print_internal(&mut res, 0);
+        print!("{}", res);
+    }
+
+    fn print_internal(&self, writer: &mut String, indention: usize) {
+        use std::fmt::Write;
+
+        write!(
+            writer,
+            "{}|- {} ({}/{})\n",
+            " ".repeat(indention),
+            self.name,
+            self.statistic.count - self.statistic.failed,
+            self.statistic.count
+        );
+
+        for report in &self.subtests {
+            report.print_internal(writer, indention + 2);
+        }
+
+        for failed in &self.failed {
+            write!(
+                writer,
+                "{}|- FAILED: {}\n",
+                " ".repeat(indention + 2),
+                failed.name,
+            );
+        }
     }
 }
