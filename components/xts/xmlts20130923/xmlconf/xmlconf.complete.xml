@@ -10160,7 +10160,7 @@ Elements must not have the prefix xmlns.
 </TESTCASES>
 
 </TESTCASES>
-<TESTCASES xml:base="eduni/namespaces/misc/">
+<TESTCASES xml:base="eduni/misc/">
     <TESTCASES PROFILE="Bjoern Hoehrmann via HST 2013-09-18">
 
 <TEST SECTIONS="2.2 [2], 4.1 [66]" URI="001.xml" ID="hst-bh-001" TYPE="not-wf">
