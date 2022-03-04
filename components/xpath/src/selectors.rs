@@ -48,7 +48,7 @@ impl Selector for ChildWithName {
                             None
                         }
                     }
-                    Err(err) => Some(Err(err)),
+                    Err(err) => Some(Err(err.into())),
                 })
         }))
     }

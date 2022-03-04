@@ -1,5 +1,4 @@
 use crate::token::{Ident, Literal, Number, Punct, Token, Tokens};
-use syn::token::parsing::punct;
 
 macro_rules! token {
     (*) => {

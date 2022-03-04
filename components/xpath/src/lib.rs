@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use xml_dom::error::Error as DomError;
+use xml_dom::error::Result as DomResult;
 use xml_dom::{Document, Element};
 
 mod ast;
@@ -54,18 +56,26 @@ struct LocationStep {
     predicates: Vec<Predicate>,
 }
 
-pub enum XPathError {}
+pub enum XPathError {
+    Dom(DomError),
+}
+
+impl From<DomError> for XPathError {
+    fn from(value: DomError) -> Self {
+        Self::Dom(value)
+    }
+}
 
 struct XPath {
     steps: Vec<LocationStep>,
 }
 
 pub(crate) trait XPathDomExt {
-    fn text_value<'a>(&self, doc: &'a Document) -> Result<Cow<'a, str>, XPathError>;
+    fn text_value<'a>(&self, doc: &'a Document) -> DomResult<Cow<'a, str>>;
 }
 
 impl XPathDomExt for Element {
-    fn text_value<'a>(&self, doc: &'a Document) -> Result<Cow<'a, str>, XPathError> {
+    fn text_value<'a>(&self, doc: &'a Document) -> DomResult<Cow<'a, str>> {
         let mut result = Cow::from(self.text(doc)?);
         for child in self.children() {
             if child.has_tail() {
