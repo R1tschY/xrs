@@ -4,64 +4,70 @@ use std::fmt::Formatter;
 use std::fs::read_to_string;
 use std::str::from_utf8;
 use std::{fmt, io};
+use xml_chars::XmlAsciiChar;
+use xml_chars::XmlChar;
 
 use crate::XmlError::{ExpectedElementEnd, ExpectedName};
 
 mod dtd;
+mod namespace;
 mod shufti;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct STagStart<'a> {
-    name: &'a [u8],
+    name: &'a str,
+}
+
+impl<'a> STagStart<'a> {
+    pub fn name(&self) -> &'a str {
+        self.name
+    }
 }
 
 #[derive(Clone, PartialEq)]
 pub struct Attribute<'a> {
-    name: &'a [u8],
-    value: &'a [u8],
+    name: &'a str,
+    raw_value: &'a str,
 }
 
 impl<'a> Attribute<'a> {
-    pub fn value(&self) -> &str {
-        from_utf8(self.value).unwrap()
+    pub fn raw_value(&self) -> &'a str {
+        self.raw_value
     }
 
-    pub fn name(&self) -> &str {
-        from_utf8(self.name).unwrap()
+    pub fn name(&self) -> &'a str {
+        self.name
     }
 }
 
 impl<'a> fmt::Debug for Attribute<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = from_utf8(self.name).unwrap();
-        let value = from_utf8(self.value).unwrap();
-
         f.debug_struct("Attribute")
-            .field("name", &name)
-            .field("value", &value)
+            .field("name", &self.name)
+            .field("value", &self.raw_value)
             .finish()
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct STagEnd<'a> {
-    name: &'a [u8],
+    name: &'a str,
 }
 
 impl<'a> STagEnd<'a> {
-    pub fn name(&self) -> &str {
-        from_utf8(self.name).unwrap()
+    pub fn name(&self) -> &'a str {
+        self.name
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ETag<'a> {
-    name: &'a [u8],
+    name: &'a str,
 }
 
 impl<'a> ETag<'a> {
-    pub fn name(&self) -> &str {
-        from_utf8(self.name).unwrap()
+    pub fn name(&self) -> &'a str {
+        self.name
     }
 }
 
@@ -72,11 +78,11 @@ pub enum XmlEvent<'a> {
     STagEnd,
     ETag(ETag<'a>),
     STagEndEmpty,
-    Characters(&'a [u8]),
+    Characters(&'a str),
 }
 
 impl<'a> XmlEvent<'a> {
-    pub fn stag_start(name: &'a [u8]) -> Self {
+    pub fn stag_start(name: &'a str) -> Self {
         XmlEvent::STagStart(STagStart { name })
     }
 
@@ -88,11 +94,11 @@ impl<'a> XmlEvent<'a> {
         XmlEvent::STagEndEmpty
     }
 
-    pub fn attr(name: &'a [u8], value: &'a [u8]) -> Self {
-        XmlEvent::Attribute(Attribute { name, value })
+    pub fn attr(name: &'a str, raw_value: &'a str) -> Self {
+        XmlEvent::Attribute(Attribute { name, raw_value })
     }
 
-    pub fn etag(name: &'a [u8]) -> Self {
+    pub fn etag(name: &'a str) -> Self {
         XmlEvent::ETag(ETag { name })
     }
 }
@@ -105,208 +111,209 @@ pub enum XmlError {
     ExpectedAttrValue,
     ExpectedEquals,
     UnexpectedEof,
+    IllegalName { name: String },
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct Cursor<'a> {
+    rest: &'a str,
+    offset: usize,
+}
+
+impl<'a> Cursor<'a> {
+    pub fn from_str(input: &'a str) -> Self {
+        Self {
+            rest: input,
+            offset: 0,
+        }
+    }
+
+    fn next_char(&self) -> Option<char> {
+        self.rest.chars().next()
+    }
+
+    fn next_byte(&self, i: usize) -> Option<u8> {
+        self.rest.as_bytes().get(i).copied()
+    }
+
+    #[inline]
+    fn has_next_char(&self, pat: char) -> bool {
+        self.rest.starts_with(pat)
+    }
+
+    #[inline]
+    fn has_next_str(&self, pat: impl AsRef<str>) -> bool {
+        self.rest.starts_with(pat.as_ref())
+    }
+
+    fn offset(&self) -> usize {
+        self.offset
+    }
+
+    fn rest(&self) -> &'a str {
+        self.rest
+    }
+
+    fn rest_bytes(&self) -> &'a [u8] {
+        self.rest.as_bytes()
+    }
+
+    fn advance(&self, bytes: usize) -> Self {
+        let (_, rest) = self.rest.split_at(bytes);
+        Self {
+            rest,
+            offset: bytes,
+        }
+    }
+
+    fn advance2(&self, bytes: usize) -> (&'a str, Self) {
+        let (diff, rest) = self.rest.split_at(bytes);
+        (
+            diff,
+            Self {
+                rest,
+                offset: bytes,
+            },
+        )
+    }
+}
+
+fn skip_whitespace(cursor: Cursor) -> Cursor {
+    if let Some(whitespace) = cursor.rest_bytes().split(|c| c.is_xml_whitespace()).next() {
+        cursor.advance(whitespace.len())
+    } else {
+        cursor
+    }
+}
+
+fn scan_name<'a>(cursor: Cursor<'a>) -> Result<(&'a str, Cursor<'a>), XmlError> {
+    let mut chars = cursor.rest().char_indices();
+
+    if !matches!(chars.next(), Some((_, c)) if c.is_xml_name_start_char()) {
+        return Err(XmlError::ExpectedName);
+    }
+
+    if let Some((i, _)) = chars.find(|(_, c)| !c.is_xml_name_char()) {
+        Ok(cursor.advance2(i))
+    } else {
+        Err(XmlError::ExpectedElementEnd)
+    }
+}
+
+fn scan_attr_value(cursor: Cursor) -> Result<(&str, Cursor), XmlError> {
+    if let Some(c) = cursor.next_byte(0) {
+        if c == b'"' {
+            let start = cursor.advance(1);
+            if let Some((i, c)) = start
+                .rest_bytes()
+                .iter()
+                .enumerate()
+                .find(|(_, &c)| c != b'"')
+            {
+                return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
+            }
+            return Err(XmlError::ExpectedAttrValue);
+        }
+        if c == b'\'' {
+            let start = cursor.advance(1);
+            if let Some((i, c)) = start
+                .rest_bytes()
+                .iter()
+                .enumerate()
+                .find(|(_, &c)| c != b'\'')
+            {
+                return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
+            }
+            return Err(XmlError::ExpectedAttrValue);
+        }
+    }
+
+    Err(XmlError::ExpectedAttrValue)
+}
+
+fn expect_byte(cursor: Cursor, c: u8, err: fn() -> XmlError) -> Result<Cursor, XmlError> {
+    if cursor.next_byte(0) == Some(c) {
+        Ok(cursor.advance(1))
+    } else {
+        Err(err())
+    }
 }
 
 pub struct Reader<'a> {
-    input: &'a [u8],
-    pos: usize,
+    cursor: Cursor<'a>,
     in_element: bool,
 }
 
-fn is_whitespace(c: u8) -> bool {
-    c == b'\x20' || c == b'\x09' || c == b'\x0D' || c == b'\x0A'
-}
-
 impl<'a> Reader<'a> {
-    pub fn new(input: &'a [u8]) -> Self {
+    pub fn new(input: &'a str) -> Self {
         Self {
-            input,
-            pos: 0,
+            cursor: Cursor::from_str(input),
             in_element: false,
         }
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.input.get(self.pos) {
-            if is_whitespace(*c) {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn scan_start_name(&mut self) -> Result<usize, XmlError> {
-        while let Some(c) = self.input.get(self.pos) {
-            if *c == b'>' || *c == b'/' {
-                return Ok(self.pos);
-            }
-            if is_whitespace(*c) {
-                let res = self.pos;
-                self.skip_whitespace();
-                return Ok(res);
-            }
-            self.pos += 1;
-        }
-
-        println!("X3");
-        Err(XmlError::ExpectedName)
-    }
-
-    fn scan_end_name(&mut self) -> Result<usize, XmlError> {
-        while let Some(c) = self.input.get(self.pos) {
-            if *c == b'>' {
-                self.pos += 1;
-                return Ok(self.pos - 1);
-            }
-            if is_whitespace(*c) {
-                let end = self.pos;
-                while let Some(c) = self.input.get(self.pos) {
-                    if *c == b'>' {
-                        self.pos += 1;
-                        return Ok(end);
-                    }
-                    if !is_whitespace(*c) {
-                        return Err(XmlError::ExpectedElementEnd);
-                    }
-                    self.pos += 1;
-                }
-                return Err(XmlError::ExpectedName);
-            }
-            self.pos += 1;
-        }
-
-        Err(XmlError::ExpectedName)
-    }
-
-    fn scan_attr_value(&mut self) -> Result<&'a [u8], XmlError> {
-        while let Some(c) = self.input.get(self.pos) {
-            if *c == b'"' {
-                self.pos += 1;
-                let start = self.pos;
-                while let Some(c) = self.input.get(self.pos) {
-                    if *c == b'"' {
-                        self.pos += 1;
-                        return Ok(&self.input[start..self.pos - 1]);
-                    }
-                    self.pos += 1;
-                }
-                return Err(XmlError::ExpectedAttrValue);
-            }
-            if *c == b'\'' {
-                self.pos += 1;
-                let start = self.pos;
-                while let Some(c) = self.input.get(self.pos) {
-                    if *c == b'\'' {
-                        self.pos += 1;
-                        return Ok(&self.input[start..self.pos - 1]);
-                    }
-                    self.pos += 1;
-                }
-                return Err(XmlError::ExpectedAttrValue);
-            }
-            if is_whitespace(*c) {
-                self.pos += 1;
-                continue;
-            }
-            return Err(XmlError::ExpectedAttrValue);
-        }
-
-        Err(XmlError::ExpectedAttrValue)
-    }
-
-    fn scan_attr_name(&mut self) -> Result<usize, XmlError> {
-        while let Some(c) = self.input.get(self.pos) {
-            if *c == b'=' {
-                let end = self.pos;
-                self.pos += 1;
-                return Ok(end);
-            }
-            if is_whitespace(*c) {
-                let end = self.pos;
-                while let Some(c) = self.input.get(self.pos) {
-                    if *c == b'=' {
-                        self.pos += 1;
-                        return Ok(end);
-                    }
-                    if !is_whitespace(*c) {
-                        return Err(XmlError::ExpectedEquals);
-                    }
-                    self.pos += 1;
-                }
-                return Err(XmlError::ExpectedName);
-            }
-            self.pos += 1;
-        }
-
-        Err(XmlError::ExpectedName)
-    }
-
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         if self.in_element {
-            self.skip_whitespace();
+            self.cursor = skip_whitespace(self.cursor);
 
-            if let Some(c) = self.input.get(self.pos) {
-                if *c == b'/' {
-                    self.pos += 1;
-                    return if Some(b'>') == self.input.get(self.pos).copied() {
-                        self.pos += 1;
+            if let Some(c) = self.cursor.next_byte(0) {
+                if c == b'/' {
+                    return if Some(b'>') == self.cursor.next_byte(1) {
                         self.in_element = false;
+                        self.cursor = self.cursor.advance(2);
                         Ok(Some(XmlEvent::STagEndEmpty))
                     } else {
                         Err(XmlError::ExpectedElementEnd)
                     };
                 }
-                if *c == b'>' {
-                    self.pos += 1;
+                if c == b'>' {
                     self.in_element = false;
+                    self.cursor = self.cursor.advance(1);
                     return Ok(Some(XmlEvent::STagEnd));
                 }
 
-                let name_start = self.pos;
-                let name_end = self.scan_attr_name()?;
-                let value = self.scan_attr_value()?;
+                let (attr_name, cursor) = scan_name(self.cursor)?;
+                let cursor = skip_whitespace(cursor);
+                let cursor = expect_byte(self.cursor, b'=', || XmlError::ExpectedEquals)?;
+                let (raw_value, cursor) = scan_attr_value(cursor)?;
+                self.cursor = cursor;
                 return Ok(Some(XmlEvent::Attribute(Attribute {
-                    name: &self.input[name_start..name_end],
-                    value,
+                    name: attr_name,
+                    raw_value,
                 })));
             }
         }
 
-        while let Some(c) = self.input.get(self.pos) {
+        while let Some(c) = self.cursor.next_byte(0) {
             let evt = match c {
                 b'<' => {
-                    self.pos += 1;
-                    if let Some(c) = self.input.get(self.pos) {
+                    if let Some(c) = self.cursor.next_byte(1) {
                         match c {
                             b'/' => {
-                                self.pos += 1;
-                                let start = self.pos;
-                                let end = self.scan_end_name()?;
-                                return Ok(Some(XmlEvent::ETag(ETag {
-                                    name: &self.input[start..end],
-                                })));
+                                let cursor = self.cursor.advance(2);
+                                let (name, cursor) = scan_name(cursor)?;
+                                let cursor = skip_whitespace(cursor);
+                                let cursor =
+                                    expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
+                                self.cursor = cursor;
+                                return Ok(Some(XmlEvent::ETag(ETag { name })));
                             }
                             _ => {
-                                let start = self.pos;
-                                let end = self.scan_start_name()?;
+                                let cursor = self.cursor.advance(1);
+                                let (name, cursor) = scan_name(self.cursor)?;
                                 self.in_element = true;
-                                return Ok(Some(XmlEvent::STagStart(STagStart {
-                                    name: &self.input[start..end],
-                                })));
+                                return Ok(Some(XmlEvent::STagStart(STagStart { name })));
                             }
                         }
                     } else {
                     }
                 }
-                _ if is_whitespace(*c) => continue,
+                _ if c.is_xml_whitespace() => self.cursor = self.cursor.advance(1),
                 _ => {
-                    println!("{}", self.pos);
+                    println!("{}", c);
                     todo!()
                 }
             };
-
-            self.pos += 1;
         }
 
         Ok(None)
@@ -319,68 +326,68 @@ mod tests {
 
     macro_rules! assert_evt {
         ($exp:expr, $reader:expr) => {
-            assert_eq!($exp, $reader.next(), "error at {}", $reader.pos)
+            assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor.offset)
         };
     }
 
     #[test]
     fn single_element() {
-        let mut reader = Reader::new(b"<elem></elem>");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
+        let mut reader = Reader::new("<elem></elem>");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end())), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag(b"elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
         assert_evt!(Ok(None), reader);
     }
 
     #[test]
     fn single_element_whitespace() {
-        let mut reader = Reader::new(b"<elem  ></elem   >");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
+        let mut reader = Reader::new("<elem  ></elem   >");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end())), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag(b"elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
         assert_evt!(Ok(None), reader);
     }
 
     #[test]
     fn empty_element() {
-        let mut reader = Reader::new(b"<elem/>");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
+        let mut reader = Reader::new("<elem/>");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }
 
     #[test]
     fn attribute() {
-        let mut reader = Reader::new(b"<elem attr=\"value\"/>");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
-        assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
+        let mut reader = Reader::new("<elem attr=\"value\"/>");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::attr("attr", "value"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }
 
     #[test]
     fn attribute_whitespace() {
-        let mut reader = Reader::new(b"<elem   attr  =  \"value\"  />");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
-        assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
+        let mut reader = Reader::new("<elem   attr  =  \"value\"  />");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::attr("attr", "value"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }
 
     #[test]
     fn single_quote_attribute() {
-        let mut reader = Reader::new(b"<elem attr='value'/>");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
-        assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
+        let mut reader = Reader::new("<elem attr='value'/>");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::attr("attr", "value"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }
 
     #[test]
     fn single_quote_attribute_whitespace() {
-        let mut reader = Reader::new(b"<elem   attr  =  'value'  />");
-        assert_evt!(Ok(Some(XmlEvent::stag_start(b"elem"))), reader);
-        assert_evt!(Ok(Some(XmlEvent::attr(b"attr", b"value"))), reader);
+        let mut reader = Reader::new("<elem   attr  =  'value'  />");
+        assert_evt!(Ok(Some(XmlEvent::stag_start("elem"))), reader);
+        assert_evt!(Ok(Some(XmlEvent::attr("attr", "value"))), reader);
         assert_evt!(Ok(Some(XmlEvent::stag_end_empty())), reader);
         assert_evt!(Ok(None), reader);
     }

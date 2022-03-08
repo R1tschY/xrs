@@ -1,8 +1,9 @@
-use crate::{characters, Span};
+use crate::Span;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::fmt;
 use std::fmt::Debug;
 use std::str::{Bytes, Chars, FromStr};
+use xml_chars::{XmlAsciiChar, XmlChar};
 
 #[derive(Debug)]
 pub struct LexError {
@@ -281,7 +282,7 @@ fn lex_expr(mut input: LexCursor) -> Result<Tokens, LexError> {
 fn skip_whitespace<'a>(input: &LexCursor<'a>) -> LexCursor<'a> {
     let len = input
         .bytes()
-        .take_while(|&ch| characters::is_whitespace_byte(ch))
+        .take_while(|&ch| ch.is_xml_whitespace())
         .count();
     if len > 0 {
         input.advance(len)
@@ -292,13 +293,9 @@ fn skip_whitespace<'a>(input: &LexCursor<'a>) -> LexCursor<'a> {
 
 fn lex_punct<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Punct), Reject> {
     if let Some(ch) = input.next_byte() {
-        if characters::is_punct_char(ch) {
+        if ch.is_xml_punct() {
             let cursor = input.advance(1);
-            let spacing = if cursor
-                .next_byte()
-                .filter(|&ch| characters::is_punct_char(ch))
-                .is_some()
-            {
+            let spacing = if cursor.next_byte().filter(|&ch| ch.is_xml_punct()).is_some() {
                 Spacing::Joined
             } else {
                 Spacing::Alone
@@ -322,14 +319,14 @@ fn lex_ncname<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Ident), Rejec
     let mut chars = input.chars();
 
     match chars.next() {
-        Some(ch) if ch != ':' && characters::is_name_start_char(ch) => {
+        Some(ch) if ch != ':' && ch.is_xml_name_start_char() => {
             buffer.push(ch);
         }
         _ => return Err(Reject),
     }
 
     for ch in chars {
-        if ch == ':' || !characters::is_name_continue_char(ch) {
+        if ch == ':' || !ch.is_xml_name_char() {
             break;
         } else {
             buffer.push(ch);

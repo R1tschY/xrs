@@ -5,4 +5,5 @@ members = [
     "components/parser",
     "components/dom",
     "components/xpath",
+    "components/chars",
 ]

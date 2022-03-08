@@ -5,7 +5,6 @@ use xml_dom::error::Result as DomResult;
 use xml_dom::{Document, Element};
 
 mod ast;
-mod characters;
 mod token;
 
 mod selectors;

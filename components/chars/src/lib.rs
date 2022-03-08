@@ -33,10 +33,6 @@ const XML_START_CHAR_TABLE: &[(char, char)] = &[
     ('\u{10000}', '\u{EFFFF}'),
 ];
 
-pub fn is_name_start_char(c: char) -> bool {
-    binary_search_table(c, XML_START_CHAR_TABLE)
-}
-
 const XML_CONTINUE_CHAR_TABLE: &[(char, char)] = &[
     ('-', '.'),
     ('0', '9'),
@@ -59,14 +55,53 @@ const XML_CONTINUE_CHAR_TABLE: &[(char, char)] = &[
     ('\u{10000}', '\u{EFFFF}'),
 ];
 
-pub fn is_name_continue_char(c: char) -> bool {
-    binary_search_table(c, XML_CONTINUE_CHAR_TABLE)
+pub trait XmlAsciiChar {
+    /// https://www.w3.org/TR/REC-xml/#NT-S
+    fn is_xml_whitespace(&self) -> bool;
+
+    fn is_xml_punct(&self) -> bool;
 }
 
-pub fn is_whitespace_byte(ch: u8) -> bool {
-    ch == b'\x20' || ch == b'\x09' || ch == b'\x0D' || ch == b'\x0A'
+pub trait XmlChar: XmlAsciiChar {
+    /// https://www.w3.org/TR/REC-xml/#NT-NameStartChar
+    fn is_xml_name_start_char(&self) -> bool;
+
+    /// https://www.w3.org/TR/REC-xml/#NT-NameChar
+    fn is_xml_name_char(&self) -> bool;
 }
 
-pub fn is_punct_char(ch: u8) -> bool {
-    b"/()[].@,:*+-=!<>$".contains(&ch)
+impl XmlAsciiChar for u8 {
+    #[inline]
+    fn is_xml_whitespace(&self) -> bool {
+        *self == b'\x20' || *self == b'\x09' || *self == b'\x0D' || *self == b'\x0A'
+    }
+
+    #[inline]
+    fn is_xml_punct(&self) -> bool {
+        b"/()[].@,:*+-=!<>$".contains(self)
+    }
+}
+
+impl XmlAsciiChar for char {
+    #[inline]
+    fn is_xml_whitespace(&self) -> bool {
+        *self == '\x20' || *self == '\x09' || *self == '\x0D' || *self == '\x0A'
+    }
+
+    #[inline]
+    fn is_xml_punct(&self) -> bool {
+        "/()[].@,:*+-=!<>$".contains(*self)
+    }
+}
+
+impl XmlChar for char {
+    #[inline]
+    fn is_xml_name_start_char(&self) -> bool {
+        binary_search_table(*self, XML_START_CHAR_TABLE)
+    }
+
+    #[inline]
+    fn is_xml_name_char(&self) -> bool {
+        binary_search_table(*self, XML_CONTINUE_CHAR_TABLE)
+    }
 }
