@@ -1,6 +1,111 @@
 use crate::{Attribute, Cursor, ETag, XmlError, XmlEvent};
 use xml_chars::{XmlAsciiChar, XmlChar};
 
+trait Parser<'a> {
+    type Attribute;
+    type Error;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error>;
+}
+
+struct SToken;
+
+impl<'a> Parser<'a> for SToken {
+    type Attribute = ();
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        Ok(((), skip_whitespace(cursor)))
+    }
+}
+
+struct NameToken;
+
+impl<'a> Parser<'a> for NameToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let mut chars = cursor.rest().char_indices();
+
+        if !matches!(chars.next(), Some((_, c)) if c.is_xml_name_start_char()) {
+            return Err(XmlError::ExpectedName);
+        }
+
+        if let Some((i, _)) = chars.find(|(_, c)| !c.is_xml_name_char()) {
+            Ok(cursor.advance2(i))
+        } else {
+            Err(XmlError::ExpectedElementEnd)
+        }
+    }
+}
+
+struct AttValueToken;
+
+impl<'a> Parser<'a> for AttValueToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Some(c) = cursor.next_byte(0) {
+            if c == b'"' {
+                let start = cursor.advance(1);
+                if let Some((i, c)) = start
+                    .rest_bytes()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, &c)| c == b'"')
+                {
+                    return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
+                }
+                return Err(XmlError::ExpectedAttrValue);
+            }
+            if c == b'\'' {
+                let start = cursor.advance(1);
+                if let Some((i, c)) = start
+                    .rest_bytes()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, &c)| c == b'\'')
+                {
+                    return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
+                }
+                return Err(XmlError::ExpectedAttrValue);
+            }
+        }
+
+        Err(XmlError::ExpectedAttrValue)
+    }
+}
+
+struct EqLiteralToken;
+
+impl<'a> Parser<'a> for EqLiteralToken {
+    type Attribute = ();
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if cursor.next_byte(0) == Some(b'=') {
+            Ok(((), cursor.advance(1)))
+        } else {
+            Err(XmlError::ExpectedEquals)
+        }
+    }
+}
+
+struct EqToken;
+
+impl<'a> Parser<'a> for EqToken {
+    type Attribute = ();
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = EqLiteralToken.parse(cursor)?;
+        SToken.parse(cursor)
+    }
+}
+
 fn skip_whitespace(cursor: Cursor) -> Cursor {
     let size = cursor
         .rest_bytes()
@@ -12,51 +117,6 @@ fn skip_whitespace(cursor: Cursor) -> Cursor {
     } else {
         cursor
     }
-}
-
-fn scan_name(cursor: Cursor) -> Result<(&str, Cursor), XmlError> {
-    let mut chars = cursor.rest().char_indices();
-
-    if !matches!(chars.next(), Some((_, c)) if c.is_xml_name_start_char()) {
-        return Err(XmlError::ExpectedName);
-    }
-
-    if let Some((i, _)) = chars.find(|(_, c)| !c.is_xml_name_char()) {
-        Ok(cursor.advance2(i))
-    } else {
-        Err(XmlError::ExpectedElementEnd)
-    }
-}
-
-fn scan_attr_value(cursor: Cursor) -> Result<(&str, Cursor), XmlError> {
-    if let Some(c) = cursor.next_byte(0) {
-        if c == b'"' {
-            let start = cursor.advance(1);
-            if let Some((i, c)) = start
-                .rest_bytes()
-                .iter()
-                .enumerate()
-                .find(|(_, &c)| c == b'"')
-            {
-                return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
-            }
-            return Err(XmlError::ExpectedAttrValue);
-        }
-        if c == b'\'' {
-            let start = cursor.advance(1);
-            if let Some((i, c)) = start
-                .rest_bytes()
-                .iter()
-                .enumerate()
-                .find(|(_, &c)| c == b'\'')
-            {
-                return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
-            }
-            return Err(XmlError::ExpectedAttrValue);
-        }
-    }
-
-    Err(XmlError::ExpectedAttrValue)
 }
 
 fn expect_byte(cursor: Cursor, c: u8, err: fn() -> XmlError) -> Result<Cursor, XmlError> {
@@ -118,7 +178,7 @@ impl<'a> Reader<'a> {
     }
 
     fn parse_stag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (name, cursor) = scan_name(self.cursor)?;
+        let (name, cursor) = NameToken.parse(self.cursor)?;
 
         self.cursor = skip_whitespace(cursor);
 
@@ -146,11 +206,9 @@ impl<'a> Reader<'a> {
             }
 
             // attribute
-            let (attr_name, cursor) = scan_name(self.cursor)?;
-            let cursor = skip_whitespace(cursor);
-            let cursor = expect_byte(cursor, b'=', || XmlError::ExpectedEquals)?;
-            let cursor = skip_whitespace(cursor);
-            let (raw_value, cursor) = scan_attr_value(cursor)?;
+            let (attr_name, cursor) = NameToken.parse(self.cursor)?;
+            let (_, cursor) = EqToken.parse(cursor)?;
+            let (raw_value, cursor) = AttValueToken.parse(cursor)?;
             self.cursor = cursor;
 
             self.attributes.push(Attribute {
@@ -163,7 +221,7 @@ impl<'a> Reader<'a> {
     }
 
     fn parse_etag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (name, cursor) = scan_name(self.cursor)?;
+        let (name, cursor) = NameToken.parse(self.cursor)?;
         let cursor = skip_whitespace(cursor);
         let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
         self.cursor = cursor;
