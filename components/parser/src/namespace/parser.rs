@@ -1,6 +1,7 @@
 use crate::namespace::stack::NamespaceStack;
 use crate::namespace::{NsAttribute, NsETag, NsSTag, QName, XmlNsEvent};
-use crate::{ETag, Reader, STag, XmlError, XmlEvent};
+use crate::reader::Reader;
+use crate::{ETag, STag, XmlError, XmlEvent};
 
 pub struct NsReader<'a> {
     reader: Reader<'a>,
