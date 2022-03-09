@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use cursor::Cursor;
 use std::fmt::Formatter;
 use std::fs::read_to_string;
 use std::str::from_utf8;
@@ -9,6 +10,7 @@ use xml_chars::XmlChar;
 
 use crate::XmlError::{ExpectedElementEnd, ExpectedName};
 
+mod cursor;
 mod dtd;
 mod namespace;
 mod shufti;
@@ -92,72 +94,6 @@ pub enum XmlError {
     ExpectedEquals,
     UnexpectedEof,
     IllegalName { name: String },
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub struct Cursor<'a> {
-    rest: &'a str,
-    offset: usize,
-}
-
-impl<'a> Cursor<'a> {
-    pub fn from_str(input: &'a str) -> Self {
-        Self {
-            rest: input,
-            offset: 0,
-        }
-    }
-
-    fn next_char(&self) -> Option<char> {
-        self.rest.chars().next()
-    }
-
-    fn next_byte(&self, i: usize) -> Option<u8> {
-        self.rest.as_bytes().get(i).copied()
-    }
-
-    #[inline]
-    fn has_next_char(&self, pat: char) -> bool {
-        self.rest.starts_with(pat)
-    }
-
-    #[inline]
-    fn has_next_str(&self, pat: impl AsRef<str>) -> bool {
-        self.rest.starts_with(pat.as_ref())
-    }
-
-    fn offset(&self) -> usize {
-        self.offset
-    }
-
-    fn rest(&self) -> &'a str {
-        self.rest
-    }
-
-    fn rest_bytes(&self) -> &'a [u8] {
-        self.rest.as_bytes()
-    }
-
-    fn advance(&self, bytes: usize) -> Self {
-        let (_ignore, rest) = self.rest.split_at(bytes);
-        println!("ADVANCE {}: {}", bytes, _ignore);
-        Self {
-            rest,
-            offset: bytes,
-        }
-    }
-
-    fn advance2(&self, bytes: usize) -> (&'a str, Self) {
-        let (diff, rest) = self.rest.split_at(bytes);
-        println!("ADVANCE {}: {}", bytes, diff);
-        (
-            diff,
-            Self {
-                rest,
-                offset: bytes,
-            },
-        )
-    }
 }
 
 fn skip_whitespace(cursor: Cursor) -> Cursor {
@@ -336,7 +272,7 @@ mod tests {
 
     macro_rules! assert_evt {
         ($exp:expr, $reader:expr) => {
-            assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor.offset)
+            assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor.offset())
         };
     }
 
