@@ -1,5 +1,6 @@
+use crate::XmlError;
 use std::fmt;
-use std::str::from_utf8;
+use std::str::{from_utf8, FromStr, ParseBoolError};
 use std::sync::Arc;
 
 pub mod parser;
@@ -9,6 +10,35 @@ pub mod stack;
 pub struct QName<'a> {
     prefix: Option<&'a str>,
     local_part: &'a str,
+}
+
+impl<'a> QName<'a> {
+    pub fn from_str(input: &'a str) -> Result<Self, XmlError> {
+        let mut spliter = input.split(|c| c == ':');
+        if let Some(first) = spliter.next() {
+            if let Some(second) = spliter.next() {
+                if let Some(_) = spliter.next() {
+                    Err(XmlError::IllegalName {
+                        name: input.to_string(),
+                    })
+                } else {
+                    Ok(QName {
+                        prefix: Some(first),
+                        local_part: second,
+                    })
+                }
+            } else {
+                Ok(QName {
+                    prefix: None,
+                    local_part: first,
+                })
+            }
+        } else {
+            Err(XmlError::IllegalName {
+                name: String::new(),
+            })
+        }
+    }
 }
 
 pub type Namespace = Arc<NamespaceDecl>;
@@ -25,8 +55,9 @@ impl NamespaceDecl {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct NsSTagStart<'a> {
+pub struct NsSTag<'a> {
     qname: QName<'a>,
+    empty: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -36,6 +67,10 @@ pub struct NsAttribute<'a> {
 }
 
 impl<'a> NsAttribute<'a> {
+    pub fn new(qname: QName<'a>, raw_value: &'a str) -> Self {
+        Self { qname, raw_value }
+    }
+
     pub fn raw_value(&self) -> &str {
         self.raw_value
     }
@@ -79,10 +114,7 @@ impl<'a> NsETag<'a> {
 /// XML event with namespace parsing
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlNsEvent<'a> {
-    STagStart(NsSTagStart<'a>),
-    Attribute(NsAttribute<'a>),
-    STagEnd,
+    STag(NsSTag<'a>),
     ETag(NsETag<'a>),
-    STagEndEmpty,
     Characters(&'a str),
 }

@@ -1,10 +1,12 @@
 use crate::namespace::stack::NamespaceStack;
-use crate::namespace::{NsAttribute, NsETag, NsSTagStart, QName, XmlNsEvent};
-use crate::{Reader, XmlError, XmlEvent};
+use crate::namespace::{NsAttribute, NsETag, NsSTag, QName, XmlNsEvent};
+use crate::{ETag, Reader, STag, XmlError, XmlEvent};
 
 pub struct NsReader<'a> {
     reader: Reader<'a>,
     namespaces: NamespaceStack,
+    empty_element: bool,
+    attributes: Vec<NsAttribute<'a>>,
 }
 
 impl<'a> NsReader<'a> {
@@ -12,72 +14,54 @@ impl<'a> NsReader<'a> {
         Self {
             reader: Reader::new(input),
             namespaces: NamespaceStack::default(),
+            empty_element: false,
+            attributes: Vec::with_capacity(4),
         }
     }
 
     pub fn next(&mut self) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
+        if self.empty_element {
+            self.namespaces.pop_scope();
+            self.empty_element = false;
+        }
+        self.attributes.clear();
+
         match self.reader.next()? {
             None => Ok(None),
-            Some(XmlEvent::STagStart(stag)) => {
-                self.namespaces.begin_scope();
-                Ok(Some(XmlNsEvent::STagStart(NsSTagStart {
-                    qname: Self::parse_qname(stag.name())?,
-                })))
-            }
-            Some(XmlEvent::Attribute(attr)) => {
-                let qname = Self::parse_qname(attr.name())?;
-                if qname.prefix == Some("xmlns") {
-                    // TODO: self.namespaces.add(qname.prefix, attr.value);
-                }
-
-                Ok(Some(XmlNsEvent::Attribute(NsAttribute {
-                    qname,
-                    raw_value: attr.raw_value(),
-                })))
-            }
-            Some(XmlEvent::STagEnd) => {
-                // TODO: self.namespaces.end_stag();
-                Ok(Some(XmlNsEvent::STagEnd))
-            }
-            Some(XmlEvent::ETag(etag)) => {
-                // TODO: self.namespaces.etag();
-                Ok(Some(XmlNsEvent::ETag(NsETag {
-                    qname: Self::parse_qname(etag.name())?,
-                })))
-            }
-            Some(XmlEvent::STagEndEmpty) => {
-                // TODO: self.namespaces.end_stag();
-                // TODO: self.namespaces.etag();
-                Ok(Some(XmlNsEvent::STagEndEmpty))
-            }
+            Some(XmlEvent::STag(stag)) => self.parse_stag(stag),
+            Some(XmlEvent::ETag(etag)) => self.parse_etag(etag),
             Some(XmlEvent::Characters(chars)) => Ok(Some(XmlNsEvent::Characters(chars))),
         }
     }
 
-    fn parse_qname(input: &str) -> Result<QName, XmlError> {
-        let mut spliter = input.split(|c| c == ':');
-        if let Some(first) = spliter.next() {
-            if let Some(second) = spliter.next() {
-                if let Some(_) = spliter.next() {
-                    Err(XmlError::IllegalName {
-                        name: input.to_string(),
-                    })
-                } else {
-                    Ok(QName {
-                        prefix: Some(first),
-                        local_part: second,
-                    })
+    fn parse_stag(&mut self, stag: STag<'a>) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
+        self.attributes.reserve(self.reader.attributes().len());
+        let mut scope = self.namespaces.build_scope();
+        for attr in self.reader.attributes() {
+            let qname = QName::from_str(attr.name())?;
+            if let Some(prefix) = qname.prefix {
+                if prefix == "xmlns" {
+                    scope.add_prefix(qname.local_part, attr.raw_value())
                 }
-            } else {
-                Ok(QName {
-                    prefix: None,
-                    local_part: first,
-                })
             }
-        } else {
-            Err(XmlError::IllegalName {
-                name: String::new(),
-            })
+
+            self.attributes
+                .push(NsAttribute::new(qname, attr.raw_value));
         }
+        scope.finish();
+
+        self.empty_element = stag.empty;
+
+        Ok(Some(XmlNsEvent::STag(NsSTag {
+            qname: QName::from_str(stag.name())?,
+            empty: stag.empty,
+        })))
+    }
+
+    fn parse_etag(&mut self, etag: ETag<'a>) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
+        self.namespaces.pop_scope();
+        Ok(Some(XmlNsEvent::ETag(NsETag {
+            qname: QName::from_str(etag.name())?,
+        })))
     }
 }

@@ -13,11 +13,17 @@ impl NamespaceStack {
         }
     }
 
-    pub fn begin_scope(&mut self) -> NamespaceStackScopeBuilder {
+    pub fn build_scope(&mut self) -> NamespaceStackScopeBuilder {
         NamespaceStackScopeBuilder {
             stack: self,
             size: 0,
         }
+    }
+
+    pub fn pop_scope(&mut self) {
+        let scope_namespaces = self.stack.pop().expect("TODO: stack underflow");
+        self.namespaces
+            .truncate(self.namespaces.len() - scope_namespaces);
     }
 }
 
@@ -36,7 +42,7 @@ impl<'a> NamespaceStackScopeBuilder<'a> {
         self.add(NamespaceDecl::new(prefix.into(), uri.into()));
     }
 
-    pub fn end(self) -> &'a mut NamespaceStack {
+    pub fn finish(self) -> &'a mut NamespaceStack {
         self.stack.stack.push(self.size);
         self.stack
     }
