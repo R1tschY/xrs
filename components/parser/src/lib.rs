@@ -55,17 +55,6 @@ impl<'a> fmt::Debug for Attribute<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct STagEnd<'a> {
-    name: &'a str,
-}
-
-impl<'a> STagEnd<'a> {
-    pub fn name(&self) -> &'a str {
-        self.name
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct ETag<'a> {
     name: &'a str,
 }
