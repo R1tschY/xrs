@@ -96,6 +96,7 @@ impl<'a> XmlEvent<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlError {
     ExpectedName,
+    ExpectedElementStart,
     ExpectedElementEnd,
     ExpectedAttrName,
     ExpectedAttrValue,
@@ -149,7 +150,8 @@ impl<'a> Cursor<'a> {
     }
 
     fn advance(&self, bytes: usize) -> Self {
-        let (_, rest) = self.rest.split_at(bytes);
+        let (_ignore, rest) = self.rest.split_at(bytes);
+        println!("ADVANCE {}: {}", bytes, _ignore);
         Self {
             rest,
             offset: bytes,
@@ -158,6 +160,7 @@ impl<'a> Cursor<'a> {
 
     fn advance2(&self, bytes: usize) -> (&'a str, Self) {
         let (diff, rest) = self.rest.split_at(bytes);
+        println!("ADVANCE {}: {}", bytes, diff);
         (
             diff,
             Self {
@@ -169,8 +172,13 @@ impl<'a> Cursor<'a> {
 }
 
 fn skip_whitespace(cursor: Cursor) -> Cursor {
-    if let Some(whitespace) = cursor.rest_bytes().split(|c| c.is_xml_whitespace()).next() {
-        cursor.advance(whitespace.len())
+    let size = cursor
+        .rest_bytes()
+        .iter()
+        .take_while(|c| c.is_xml_whitespace())
+        .count();
+    if size > 0 {
+        cursor.advance(size)
     } else {
         cursor
     }
@@ -198,7 +206,7 @@ fn scan_attr_value(cursor: Cursor) -> Result<(&str, Cursor), XmlError> {
                 .rest_bytes()
                 .iter()
                 .enumerate()
-                .find(|(_, &c)| c != b'"')
+                .find(|(_, &c)| c == b'"')
             {
                 return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
             }
@@ -210,7 +218,7 @@ fn scan_attr_value(cursor: Cursor) -> Result<(&str, Cursor), XmlError> {
                 .rest_bytes()
                 .iter()
                 .enumerate()
-                .find(|(_, &c)| c != b'\'')
+                .find(|(_, &c)| c == b'\'')
             {
                 return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
             }
@@ -256,55 +264,57 @@ impl<'a> Reader<'a> {
         while let Some(c) = self.cursor.next_byte(0) {
             let evt = match c {
                 b'<' => {
-                    if let Some(c) = self.cursor.next_byte(1) {
-                        match c {
-                            b'/' => {
-                                let cursor = self.cursor.advance(2);
-                                let (name, cursor) = scan_name(cursor)?;
-                                let cursor = skip_whitespace(cursor);
-                                let cursor =
-                                    expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
-                                self.cursor = cursor;
-                                return Ok(Some(XmlEvent::ETag(ETag { name })));
-                            }
-                            _ => {
-                                let cursor = self.cursor.advance(1);
-                                let (name, cursor) = scan_name(self.cursor)?;
+                    return if let Some(c) = self.cursor.next_byte(1) {
+                        if c == b'/' {
+                            let cursor = self.cursor.advance(2);
+                            let (name, cursor) = scan_name(cursor)?;
+                            let cursor = skip_whitespace(cursor);
+                            let cursor =
+                                expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
+                            self.cursor = cursor;
+                            Ok(Some(XmlEvent::ETag(ETag { name })))
+                        } else {
+                            let cursor = self.cursor.advance(1);
+                            let (name, cursor) = scan_name(cursor)?;
 
-                                self.cursor = skip_whitespace(self.cursor);
+                            self.cursor = skip_whitespace(cursor);
 
-                                while let Some(c) = self.cursor.next_byte(0) {
-                                    if c == b'/' {
-                                        return if Some(b'>') == self.cursor.next_byte(1) {
-                                            self.cursor = self.cursor.advance(2);
-                                            Ok(Some(XmlEvent::stag(name, true)))
-                                        } else {
-                                            Err(XmlError::ExpectedElementEnd)
-                                        };
-                                    }
-                                    if c == b'>' {
-                                        self.cursor = self.cursor.advance(1);
-                                        return Ok(Some(XmlEvent::stag(name, false)));
-                                    }
-
-                                    let (attr_name, cursor) = scan_name(self.cursor)?;
-                                    let cursor = skip_whitespace(cursor);
-                                    let cursor = expect_byte(self.cursor, b'=', || {
-                                        XmlError::ExpectedEquals
-                                    })?;
-                                    let (raw_value, cursor) = scan_attr_value(cursor)?;
-                                    self.cursor = cursor;
-
-                                    self.attributes.push(Attribute {
-                                        name: attr_name,
-                                        raw_value,
-                                    });
+                            while let Some(c) = self.cursor.next_byte(0) {
+                                if c == b'/' {
+                                    return if Some(b'>') == self.cursor.next_byte(1) {
+                                        self.cursor = self.cursor.advance(2);
+                                        Ok(Some(XmlEvent::stag(name, true)))
+                                    } else {
+                                        Err(XmlError::ExpectedElementEnd)
+                                    };
+                                }
+                                if c == b'>' {
+                                    self.cursor = self.cursor.advance(1);
+                                    return Ok(Some(XmlEvent::stag(name, false)));
+                                }
+                                if c.is_xml_whitespace() {
+                                    self.cursor = self.cursor.advance(1);
+                                    continue;
                                 }
 
-                                return Err(XmlError::ExpectedElementEnd);
+                                let (attr_name, cursor) = scan_name(self.cursor)?;
+                                let cursor = skip_whitespace(cursor);
+                                let cursor =
+                                    expect_byte(cursor, b'=', || XmlError::ExpectedEquals)?;
+                                let cursor = skip_whitespace(cursor);
+                                let (raw_value, cursor) = scan_attr_value(cursor)?;
+                                self.cursor = cursor;
+
+                                self.attributes.push(Attribute {
+                                    name: attr_name,
+                                    raw_value,
+                                });
                             }
+
+                            Err(XmlError::ExpectedElementEnd)
                         }
                     } else {
+                        Err(XmlError::ExpectedElementStart)
                     }
                 }
                 _ if c.is_xml_whitespace() => self.cursor = self.cursor.advance(1),
