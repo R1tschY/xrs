@@ -266,52 +266,11 @@ impl<'a> Reader<'a> {
                 b'<' => {
                     return if let Some(c) = self.cursor.next_byte(1) {
                         if c == b'/' {
-                            let cursor = self.cursor.advance(2);
-                            let (name, cursor) = scan_name(cursor)?;
-                            let cursor = skip_whitespace(cursor);
-                            let cursor =
-                                expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
-                            self.cursor = cursor;
-                            Ok(Some(XmlEvent::ETag(ETag { name })))
+                            self.cursor = self.cursor.advance(2);
+                            self.parse_etag()
                         } else {
-                            let cursor = self.cursor.advance(1);
-                            let (name, cursor) = scan_name(cursor)?;
-
-                            self.cursor = skip_whitespace(cursor);
-
-                            while let Some(c) = self.cursor.next_byte(0) {
-                                if c == b'/' {
-                                    return if Some(b'>') == self.cursor.next_byte(1) {
-                                        self.cursor = self.cursor.advance(2);
-                                        Ok(Some(XmlEvent::stag(name, true)))
-                                    } else {
-                                        Err(XmlError::ExpectedElementEnd)
-                                    };
-                                }
-                                if c == b'>' {
-                                    self.cursor = self.cursor.advance(1);
-                                    return Ok(Some(XmlEvent::stag(name, false)));
-                                }
-                                if c.is_xml_whitespace() {
-                                    self.cursor = self.cursor.advance(1);
-                                    continue;
-                                }
-
-                                let (attr_name, cursor) = scan_name(self.cursor)?;
-                                let cursor = skip_whitespace(cursor);
-                                let cursor =
-                                    expect_byte(cursor, b'=', || XmlError::ExpectedEquals)?;
-                                let cursor = skip_whitespace(cursor);
-                                let (raw_value, cursor) = scan_attr_value(cursor)?;
-                                self.cursor = cursor;
-
-                                self.attributes.push(Attribute {
-                                    name: attr_name,
-                                    raw_value,
-                                });
-                            }
-
-                            Err(XmlError::ExpectedElementEnd)
+                            self.cursor = self.cursor.advance(1);
+                            self.parse_stag()
                         }
                     } else {
                         Err(XmlError::ExpectedElementStart)
@@ -326,6 +285,59 @@ impl<'a> Reader<'a> {
         }
 
         Ok(None)
+    }
+
+    fn parse_stag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (name, cursor) = scan_name(self.cursor)?;
+
+        self.cursor = skip_whitespace(cursor);
+
+        while let Some(c) = self.cursor.next_byte(0) {
+            // /> empty end
+            if c == b'/' {
+                return if Some(b'>') == self.cursor.next_byte(1) {
+                    self.cursor = self.cursor.advance(2);
+                    Ok(Some(XmlEvent::stag(name, true)))
+                } else {
+                    Err(XmlError::ExpectedElementEnd)
+                };
+            }
+
+            // normal end
+            if c == b'>' {
+                self.cursor = self.cursor.advance(1);
+                return Ok(Some(XmlEvent::stag(name, false)));
+            }
+
+            // whitespace
+            if c.is_xml_whitespace() {
+                self.cursor = self.cursor.advance(1);
+                continue;
+            }
+
+            // attribute
+            let (attr_name, cursor) = scan_name(self.cursor)?;
+            let cursor = skip_whitespace(cursor);
+            let cursor = expect_byte(cursor, b'=', || XmlError::ExpectedEquals)?;
+            let cursor = skip_whitespace(cursor);
+            let (raw_value, cursor) = scan_attr_value(cursor)?;
+            self.cursor = cursor;
+
+            self.attributes.push(Attribute {
+                name: attr_name,
+                raw_value,
+            });
+        }
+
+        Err(XmlError::ExpectedElementEnd)
+    }
+
+    fn parse_etag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (name, cursor) = scan_name(self.cursor)?;
+        let cursor = skip_whitespace(cursor);
+        let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
+        self.cursor = cursor;
+        Ok(Some(XmlEvent::ETag(ETag { name })))
     }
 }
 
