@@ -182,7 +182,11 @@ impl<'a> Reader<'a> {
             };
         }
 
-        Ok(None)
+        if self.depth != 0 {
+            Err(XmlError::OpenElementAtEof)
+        } else {
+            Ok(None)
+        }
     }
 
     fn is_after_root(&self) -> bool {
@@ -390,5 +394,12 @@ mod tests {
         let mut reader = Reader::new("<e/> \r\t\n");
         assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
         assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn fail_on_open_stag() {
+        let mut reader = Reader::new("<e>");
+        assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+        assert_evt!(Err(XmlError::OpenElementAtEof), reader);
     }
 }
