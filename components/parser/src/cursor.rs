@@ -44,7 +44,7 @@ impl<'a> Cursor<'a> {
 
     pub fn advance(&self, bytes: usize) -> Self {
         let (_ignore, rest) = self.rest.split_at(bytes);
-        println!("ADVANCE {}: {}", bytes, _ignore);
+        println!("ADVANCE {}: {:?}", bytes, _ignore);
         Self {
             rest,
             offset: bytes,
@@ -53,7 +53,7 @@ impl<'a> Cursor<'a> {
 
     pub fn advance2(&self, bytes: usize) -> (&'a str, Self) {
         let (diff, rest) = self.rest.split_at(bytes);
-        println!("ADVANCE {}: {}", bytes, diff);
+        println!("ADVANCE {}: {:?}", bytes, diff);
         (
             diff,
             Self {

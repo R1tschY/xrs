@@ -211,6 +211,17 @@ impl<'a> Reader<'a> {
             let (raw_value, cursor) = AttValueToken.parse(cursor)?;
             self.cursor = cursor;
 
+            if self
+                .attributes
+                .iter()
+                .find(|attr| attr.name == attr_name)
+                .is_some()
+            {
+                return Err(XmlError::NonUniqueAttribute {
+                    attribute: attr_name.to_string(),
+                });
+            }
+
             self.attributes.push(Attribute {
                 name: attr_name,
                 raw_value,
@@ -232,8 +243,8 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use crate::reader::Reader;
-    use crate::Attribute;
     use crate::XmlEvent;
+    use crate::{Attribute, XmlError};
 
     macro_rules! assert_evt {
         ($exp:expr, $reader:expr) => {
@@ -280,7 +291,7 @@ mod tests {
 
     #[test]
     fn attribute_whitespace() {
-        let mut reader = Reader::new("<elem   attr  =  \"value\"  />");
+        let mut reader = Reader::new("<elem \t \n \r attr  =  \"value\"  />");
         assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
         assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
         assert_evt!(Ok(None), reader);
@@ -296,9 +307,31 @@ mod tests {
 
     #[test]
     fn single_quote_attribute_whitespace() {
-        let mut reader = Reader::new("<elem   attr  =  'value'  />");
+        let mut reader = Reader::new("<elem attr  =  'value'  />");
         assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
         assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
         assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn multiple_attributes() {
+        let mut reader = Reader::new("<e a='v' b='w' />");
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_eq!(
+            &[Attribute::new("a", "v"), Attribute::new("b", "w")],
+            reader.attributes()
+        );
+        assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn attribute_duplicate() {
+        let mut reader = Reader::new("<e a='' a='' />");
+        assert_evt!(
+            Err(XmlError::NonUniqueAttribute {
+                attribute: "a".to_string()
+            }),
+            reader
+        );
     }
 }
