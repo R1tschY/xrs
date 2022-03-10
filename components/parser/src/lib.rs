@@ -93,6 +93,7 @@ pub enum XmlError {
     ExpectedAttrName,
     ExpectedAttrValue,
     ExpectedEquals,
+    ExpectedDocumentEnd,
     UnexpectedEof,
     NonUniqueAttribute { attribute: String },
     IllegalName { name: String },

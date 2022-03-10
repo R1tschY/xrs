@@ -132,6 +132,8 @@ pub struct Reader<'a> {
     attributes: Vec<Attribute<'a>>,
     xml_lang: Option<&'a str>,
     depth: usize,
+    empty: bool,
+    seen_root: bool,
 }
 
 impl<'a> Reader<'a> {
@@ -141,6 +143,8 @@ impl<'a> Reader<'a> {
             attributes: Vec::with_capacity(4),
             xml_lang: None,
             depth: 0,
+            empty: false,
+            seen_root: false,
         }
     }
 
@@ -150,6 +154,10 @@ impl<'a> Reader<'a> {
 
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         self.attributes.clear();
+        if self.empty {
+            self.depth -= 1;
+            self.empty = false;
+        }
 
         while let Some(c) = self.cursor.next_byte(0) {
             let evt = match c {
@@ -177,7 +185,15 @@ impl<'a> Reader<'a> {
         Ok(None)
     }
 
+    fn is_after_root(&self) -> bool {
+        self.depth == 0 && self.seen_root
+    }
+
     fn parse_stag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        if self.is_after_root() {
+            return Err(XmlError::ExpectedDocumentEnd);
+        }
+
         let (name, cursor) = NameToken.parse(self.cursor)?;
 
         self.cursor = skip_whitespace(cursor);
@@ -187,6 +203,9 @@ impl<'a> Reader<'a> {
             if c == b'/' {
                 return if Some(b'>') == self.cursor.next_byte(1) {
                     self.cursor = self.cursor.advance(2);
+                    self.empty = true;
+                    self.seen_root = true;
+                    self.depth += 1;
                     Ok(Some(XmlEvent::stag(name, true)))
                 } else {
                     Err(XmlError::ExpectedElementEnd)
@@ -196,6 +215,9 @@ impl<'a> Reader<'a> {
             // normal end
             if c == b'>' {
                 self.cursor = self.cursor.advance(1);
+                self.empty = false;
+                self.seen_root = true;
+                self.depth += 1;
                 return Ok(Some(XmlEvent::stag(name, false)));
             }
 
@@ -232,10 +254,15 @@ impl<'a> Reader<'a> {
     }
 
     fn parse_etag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        if self.is_after_root() {
+            return Err(XmlError::ExpectedDocumentEnd);
+        }
+
         let (name, cursor) = NameToken.parse(self.cursor)?;
         let cursor = skip_whitespace(cursor);
         let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
         self.cursor = cursor;
+        self.depth -= 1;
         Ok(Some(XmlEvent::ETag(ETag { name })))
     }
 }
@@ -333,5 +360,35 @@ mod tests {
             }),
             reader
         );
+    }
+
+    #[test]
+    fn only_one_top_level_element() {
+        let mut reader = Reader::new("<e></e><e/>");
+        assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+        assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+        assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+    }
+
+    #[test]
+    fn fail_on_open_etag() {
+        let mut reader = Reader::new("<e></e></e>");
+        assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+        assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+        assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+    }
+
+    #[test]
+    fn only_one_top_level_element_empty() {
+        let mut reader = Reader::new("<e/><e/>");
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+    }
+
+    #[test]
+    fn accept_whitespace_after_root() {
+        let mut reader = Reader::new("<e/> \r\t\n");
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_evt!(Ok(None), reader);
     }
 }
