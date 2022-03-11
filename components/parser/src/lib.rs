@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use cursor::Cursor;
+use parser::cursor::Cursor;
 use std::fmt::Formatter;
 use std::fs::read_to_string;
 use std::str::from_utf8;
@@ -10,9 +10,9 @@ use xml_chars::XmlChar;
 
 use crate::XmlError::{ExpectedElementEnd, ExpectedName};
 
-mod cursor;
 mod dtd;
 mod namespace;
+pub mod parser;
 mod reader;
 mod shufti;
 
