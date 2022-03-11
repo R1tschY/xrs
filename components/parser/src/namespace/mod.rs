@@ -1,4 +1,4 @@
-use crate::XmlError;
+use crate::{XmlDecl, XmlError};
 use std::fmt;
 use std::str::{from_utf8, FromStr, ParseBoolError};
 use std::sync::Arc;
@@ -114,6 +114,7 @@ impl<'a> NsETag<'a> {
 /// XML event with namespace parsing
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlNsEvent<'a> {
+    XmlDecl(XmlDecl<'a>),
     STag(NsSTag<'a>),
     ETag(NsETag<'a>),
     Characters(&'a str),

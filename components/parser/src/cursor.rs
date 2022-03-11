@@ -30,6 +30,11 @@ impl<'a> Cursor<'a> {
         self.rest.starts_with(pat.as_ref())
     }
 
+    #[inline]
+    pub fn has_next_bytes(&self, pat: impl AsRef<[u8]>) -> bool {
+        self.rest.as_bytes().starts_with(pat.as_ref())
+    }
+
     pub fn offset(&self) -> usize {
         self.offset
     }
@@ -47,7 +52,7 @@ impl<'a> Cursor<'a> {
         println!("ADVANCE {}: {:?}", bytes, _ignore);
         Self {
             rest,
-            offset: bytes,
+            offset: self.offset + bytes,
         }
     }
 
@@ -58,7 +63,7 @@ impl<'a> Cursor<'a> {
             diff,
             Self {
                 rest,
-                offset: bytes,
+                offset: self.offset + bytes,
             },
         )
     }

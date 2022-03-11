@@ -17,6 +17,13 @@ mod reader;
 mod shufti;
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct XmlDecl<'a> {
+    version: &'a str,
+    encoding: Option<&'a str>,
+    standalone: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct STag<'a> {
     name: &'a str,
     empty: bool,
@@ -70,12 +77,21 @@ impl<'a> ETag<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlEvent<'a> {
+    XmlDecl(XmlDecl<'a>),
     STag(STag<'a>),
     ETag(ETag<'a>),
     Characters(&'a str),
 }
 
 impl<'a> XmlEvent<'a> {
+    pub fn decl(version: &'a str, encoding: Option<&'a str>, standalone: Option<bool>) -> Self {
+        XmlEvent::XmlDecl(XmlDecl {
+            version,
+            encoding,
+            standalone,
+        })
+    }
+
     pub fn stag(name: &'a str, empty: bool) -> Self {
         XmlEvent::STag(STag { name, empty })
     }
@@ -95,6 +111,10 @@ pub enum XmlError {
     ExpectedEquals,
     ExpectedDocumentEnd,
     UnexpectedEof,
+    OpenElementAtEof,
     NonUniqueAttribute { attribute: String },
     IllegalName { name: String },
+    ExpectToken(&'static str),
+    IllegalAttributeValue(&'static str),
+    UnsupportedEncoding(String),
 }

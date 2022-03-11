@@ -1,12 +1,214 @@
-use crate::{Attribute, Cursor, ETag, XmlError, XmlEvent};
+use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent};
+use std::marker::PhantomData;
 use xml_chars::{XmlAsciiChar, XmlChar};
 
-trait Parser<'a> {
+pub trait Parser<'a> {
     type Attribute;
     type Error;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error>;
 }
+
+// Core
+
+#[inline]
+pub fn lexeme<'a, T: 'a + Parser<'a>>(parser: T) -> Lexeme<'a, T> {
+    Lexeme(parser, PhantomData)
+}
+
+pub struct Lexeme<'a, T: Parser<'a>>(T, PhantomData<&'a T>);
+
+impl<'a, T: Parser<'a>> Parser<'a> for Lexeme<'a, T> {
+    type Attribute = &'a str;
+    type Error = T::Error;
+
+    fn parse(&self, start: Cursor<'a>) -> Result<(&'a str, Cursor<'a>), T::Error> {
+        let (_, end) = self.0.parse(start)?;
+        Ok(start.advance2(end.offset() - start.offset()))
+    }
+}
+
+struct Optional<T>(T);
+
+impl<'a, T: Parser<'a>> Parser<'a> for Optional<T> {
+    type Attribute = Option<T::Attribute>;
+    type Error = T::Error;
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), T::Error> {
+        match self.0.parse(cur) {
+            Ok((attr, cur)) => Ok((Some(attr), cur)),
+            Err(err) => Ok((None, cur)),
+        }
+    }
+}
+
+struct Kleene<T>(T);
+
+impl<'a, T: Parser<'a>> Parser<'a> for Kleene<T> {
+    type Attribute = Vec<T::Attribute>;
+    type Error = T::Error;
+
+    fn parse(&self, mut cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), T::Error> {
+        let mut res = vec![];
+        while let Ok((attr, cursor)) = self.0.parse(cur) {
+            cur = cursor;
+            res.push(attr);
+        }
+        Ok((res, cur))
+    }
+}
+
+struct Plus<T>(T);
+
+impl<'a, T: Parser<'a>> Parser<'a> for Plus<T> {
+    type Attribute = Vec<T::Attribute>;
+    type Error = T::Error;
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), T::Error> {
+        let mut res = vec![];
+        let (first, mut cur) = self.0.parse(cur)?;
+        res.push(first);
+
+        while let Ok((attr, cursor)) = self.0.parse(cur) {
+            cur = cursor;
+            res.push(attr);
+        }
+
+        Ok((res, cur))
+    }
+}
+
+#[inline]
+pub fn seq2<'a, T1: Parser<'a, Error = E>, T2: Parser<'a, Error = E>, E>(
+    parser1: T1,
+    parser2: T2,
+) -> Sequence2<T1, T2> {
+    Sequence2(parser1, parser2)
+}
+
+pub struct Sequence2<T1, T2>(T1, T2);
+
+impl<'a, T1: Parser<'a, Error = E>, T2: Parser<'a, Error = E>, E> Parser<'a> for Sequence2<T1, T2> {
+    type Attribute = (T1::Attribute, T2::Attribute);
+    type Error = E;
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (v1, cur) = self.0.parse(cur)?;
+        let (v2, cur) = self.1.parse(cur)?;
+        Ok(((v1, v2), cur))
+    }
+}
+
+// Helper
+
+// struct MapAttr<T, U, F: Fn(T::Attribute) -> U>(T, F);
+//
+// impl<'a, T: Parser<'a>, U, F: Fn(T::Attribute) -> U> Parser<'a> for MapAttr<T, U, F> {
+//     type Attribute = U;
+//     type Error = T::Error;
+//
+//     fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), T::Error> {
+//         self.0.parse(cur).map(&self.1)
+//     }
+// }
+
+#[inline]
+pub fn map_error<'a, T: Parser<'a>, E, F: Fn(T::Error) -> E>(
+    parser: T,
+    f: F,
+) -> MapError<'a, T, E, F> {
+    MapError(parser, f, PhantomData)
+}
+
+pub struct MapError<'a, T: Parser<'a>, E, F: Fn(T::Error) -> E>(T, F, PhantomData<&'a E>);
+
+impl<'a, T: Parser<'a>, E, F: Fn(T::Error) -> E> Parser<'a> for MapError<'a, T, E, F> {
+    type Attribute = T::Attribute;
+    type Error = E;
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        self.0.parse(cur).map_err(&self.1)
+    }
+}
+
+#[inline]
+pub fn omit<'a, T: Parser<'a>>(parser: T) -> Omit<T> {
+    Omit(parser)
+}
+
+pub struct Omit<T>(T);
+
+impl<'a, T: Parser<'a>> Parser<'a> for Omit<T> {
+    type Attribute = ();
+    type Error = T::Error;
+
+    fn parse(&self, mut cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        self.0.parse(cur).map(|(_, cur)| ((), cur))
+    }
+}
+
+#[inline]
+pub fn omit_error<'a, T: Parser<'a>>(parser: T) -> OmitError<T> {
+    OmitError(parser)
+}
+
+pub struct OmitError<T>(T);
+
+impl<'a, T: Parser<'a>> Parser<'a> for OmitError<T> {
+    type Attribute = T::Attribute;
+    type Error = ();
+
+    fn parse(&self, mut cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        self.0.parse(cur).map_err(|err| ())
+    }
+}
+
+// Strings
+
+pub fn lit(lit: &'static str) -> Lit {
+    Lit { lit }
+}
+
+pub struct Lit {
+    lit: &'static str,
+}
+
+impl<'a> Parser<'a> for Lit {
+    type Attribute = ();
+    type Error = ();
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if !cur.has_next_str(self.lit) {
+            return Err(());
+        } else {
+            Ok(((), cur.advance(self.lit.len())))
+        }
+    }
+}
+
+pub fn char_<P: Fn(char) -> bool>(predicate: P) -> Char<P> {
+    Char { predicate }
+}
+
+pub struct Char<P: Fn(char) -> bool> {
+    predicate: P,
+}
+
+impl<'a, P: Fn(char) -> bool> Parser<'a> for Char<P> {
+    type Attribute = ();
+    type Error = ();
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Some(c) = cur.next_char() {
+            if (self.predicate)(c) {
+                return Ok(((), cur.advance(1)));
+            }
+        }
+        Err(())
+    }
+}
+
+// XML
 
 struct SToken;
 
@@ -93,6 +295,62 @@ impl<'a> Parser<'a> for EqLiteralToken {
     }
 }
 
+// 2.8 Prolog and Document Type Declaration
+
+struct XmlDeclToken;
+
+impl<'a> Parser<'a> for XmlDeclToken {
+    type Attribute = XmlDecl<'a>;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) =
+            map_error(lit("<?xml"), |_| XmlError::ExpectToken("<?xml")).parse(cursor)?;
+        let (version, cursor) = VersionInfoToken.parse(cursor)?;
+        let (encoding, cursor) = Optional(EncodingDeclToken).parse(cursor)?;
+        let (standalone, cursor) = Optional(SDDeclToken).parse(cursor)?;
+        let (_, cursor) = Optional(SToken).parse(cursor)?;
+        let (_, cursor) = map_error(lit("?>"), |_| XmlError::ExpectToken("?>")).parse(cursor)?;
+
+        Ok((
+            XmlDecl {
+                version,
+                encoding,
+                standalone,
+            },
+            cursor,
+        ))
+    }
+}
+
+struct VersionInfoToken;
+
+impl<'a> Parser<'a> for VersionInfoToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = expect_token(cursor, "version")?;
+        let (_, cursor) = EqToken.parse(cursor)?;
+
+        let c = cursor.next_byte(0);
+        Ok(if c == Some(b'\'') {
+            let cursor = cursor.advance(1);
+            let (version, cursor) = VersionNumToken.parse(cursor)?;
+            let (_, cursor) = expect_token(cursor, "\'")?;
+            (version, cursor)
+        } else if c == Some(b'\"') {
+            let cursor = cursor.advance(1);
+            let (version, cursor) = VersionNumToken.parse(cursor)?;
+            let (_, cursor) = expect_token(cursor, "\"")?;
+            (version, cursor)
+        } else {
+            return Err(XmlError::ExpectToken("' or \""));
+        })
+    }
+}
+
 struct EqToken;
 
 impl<'a> Parser<'a> for EqToken {
@@ -101,8 +359,123 @@ impl<'a> Parser<'a> for EqToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
         let (_, cursor) = SToken.parse(cursor)?;
-        let (_, cursor) = EqLiteralToken.parse(cursor)?;
+        let (_, cursor) = map_error(lit("="), |_| XmlError::ExpectToken("=")).parse(cursor)?;
         SToken.parse(cursor)
+    }
+}
+
+struct VersionNumToken;
+
+impl<'a> Parser<'a> for VersionNumToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        map_error(
+            lexeme(seq2(lit("1."), Plus(char_(|c: char| c.is_ascii_digit())))),
+            |_| XmlError::ExpectToken("1.[0-9]+"),
+        )
+        .parse(cursor)
+    }
+}
+
+// 2.9 Standalone Document Declaration
+
+struct SDDeclToken;
+
+impl<'a> Parser<'a> for SDDeclToken {
+    type Attribute = bool;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = expect_token(cursor, "standalone")?;
+        let (_, cursor) = EqToken.parse(cursor)?;
+
+        let (yes_no, cursor) = if cursor.next_byte(0) == Some(b'\'') {
+            let cursor = cursor.advance(1);
+            let (yes_no, cursor) = map_error(lexeme(Plus(char_(|c: char| c != '\''))), |_| {
+                XmlError::ExpectToken("'yes' | 'no'")
+            })
+            .parse(cursor)?;
+            let (_, cursor) = expect_token(cursor, "\'")?;
+            (yes_no, cursor)
+        } else if cursor.next_byte(0) == Some(b'\"') {
+            let cursor = cursor.advance(1);
+            let (yes_no, cursor) = map_error(lexeme(Plus(char_(|c: char| c != '\"'))), |_| {
+                XmlError::ExpectToken("'yes' | 'no'")
+            })
+            .parse(cursor)?;
+            let (_, cursor) = expect_token(cursor, "\"")?;
+            (yes_no, cursor)
+        } else {
+            return Err(XmlError::ExpectToken("' or \""));
+        };
+
+        if yes_no == "yes" {
+            Ok((true, cursor))
+        } else if yes_no == "no" {
+            Ok((false, cursor))
+        } else {
+            return Err(XmlError::IllegalAttributeValue("Expected yes or no"));
+        }
+    }
+}
+
+// 4.3.3 Character Encoding in Entities
+
+struct EncodingDeclToken;
+
+impl<'a> Parser<'a> for EncodingDeclToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = expect_token(cursor, "encoding")?;
+        let (_, cursor) = EqToken.parse(cursor)?;
+
+        Ok(if cursor.next_byte(0) == Some(b'\'') {
+            let cursor = cursor.advance(1);
+            let (encoding, cursor) = EncNameToken.parse(cursor)?;
+            let (_, cursor) = expect_token(cursor, "\'")?;
+            (encoding, cursor)
+        } else if cursor.next_byte(0) == Some(b'\"') {
+            let cursor = cursor.advance(1);
+            let (encoding, cursor) = EncNameToken.parse(cursor)?;
+            let (_, cursor) = expect_token(cursor, "\"")?;
+            (encoding, cursor)
+        } else {
+            return Err(XmlError::ExpectToken("' or \""));
+        })
+    }
+}
+
+struct EncNameToken;
+
+impl<'a> Parser<'a> for EncNameToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        map_error(
+            lexeme(seq2(
+                char_(|c: char| c.is_ascii_alphabetic()),
+                Kleene(char_(|c: char| {
+                    c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'
+                })),
+            )),
+            |_| XmlError::ExpectToken("Encoding name: [a-zA-Z][a-zA-Z0-9._-]+"),
+        )
+        .parse(cursor)
+    }
+}
+
+fn expect_token<'a>(cursor: Cursor<'a>, token: &'static str) -> Result<((), Cursor<'a>), XmlError> {
+    if !cursor.has_next_str(token) {
+        return Err(XmlError::ExpectToken(token));
+    } else {
+        Ok(((), cursor.advance(token.len())))
     }
 }
 
@@ -134,6 +507,8 @@ pub struct Reader<'a> {
     depth: usize,
     empty: bool,
     seen_root: bool,
+    version: Option<&'a str>,
+    standalone: Option<bool>,
 }
 
 impl<'a> Reader<'a> {
@@ -145,9 +520,17 @@ impl<'a> Reader<'a> {
             depth: 0,
             empty: false,
             seen_root: false,
+            version: None,
+            standalone: None,
         }
     }
 
+    #[inline]
+    pub fn is_prolog(&self) -> bool {
+        !self.seen_root
+    }
+
+    #[inline]
     pub fn attributes(&self) -> &[Attribute<'a>] {
         &self.attributes
     }
@@ -166,6 +549,13 @@ impl<'a> Reader<'a> {
                         if c == b'/' {
                             self.cursor = self.cursor.advance(2);
                             self.parse_etag()
+                        } else if c == b'?' {
+                            if self.is_prolog() && self.version.is_none() {
+                                self.parse_decl()
+                            } else {
+                                self.cursor = self.cursor.advance(2);
+                                todo!()
+                            }
                         } else {
                             self.cursor = self.cursor.advance(1);
                             self.parse_stag()
@@ -268,6 +658,22 @@ impl<'a> Reader<'a> {
         self.cursor = cursor;
         self.depth -= 1;
         Ok(Some(XmlEvent::ETag(ETag { name })))
+    }
+
+    fn parse_decl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (decl, cursor) = XmlDeclToken.parse(self.cursor)?;
+
+        self.version = Some(decl.version);
+        self.standalone = decl.standalone;
+
+        if let Some(encoding) = decl.encoding {
+            if encoding != "UTF-8" {
+                return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
+            }
+        }
+
+        self.cursor = cursor;
+        Ok(Some(XmlEvent::XmlDecl(decl)))
     }
 }
 
@@ -401,5 +807,49 @@ mod tests {
         let mut reader = Reader::new("<e>");
         assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
         assert_evt!(Err(XmlError::OpenElementAtEof), reader);
+    }
+
+    #[test]
+    fn parse_minimal_decl() {
+        let mut reader = Reader::new("<?xml version='1.0' ?><e/>");
+        assert_evt!(Ok(Some(XmlEvent::decl("1.0", None, None))), reader);
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn parse_full_decl() {
+        let mut reader =
+            Reader::new("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><e/>");
+        assert_evt!(
+            Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
+            reader
+        );
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn parse_decl_double_qoute() {
+        let mut reader =
+            Reader::new("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\" ?><e/>");
+        assert_evt!(
+            Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
+            reader
+        );
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_evt!(Ok(None), reader);
+    }
+
+    #[test]
+    fn parse_decl_whitespace() {
+        let mut reader =
+            Reader::new("<?xml version =\t'1.0' encoding\n = \r'UTF-8' standalone =  'yes'?><e/>");
+        assert_evt!(
+            Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
+            reader
+        );
+        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+        assert_evt!(Ok(None), reader);
     }
 }

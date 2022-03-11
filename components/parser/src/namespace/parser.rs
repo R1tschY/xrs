@@ -32,6 +32,7 @@ impl<'a> NsReader<'a> {
             Some(XmlEvent::STag(stag)) => self.parse_stag(stag),
             Some(XmlEvent::ETag(etag)) => self.parse_etag(etag),
             Some(XmlEvent::Characters(chars)) => Ok(Some(XmlNsEvent::Characters(chars))),
+            Some(XmlEvent::XmlDecl(decl)) => Ok(Some(XmlNsEvent::XmlDecl(decl))),
         }
     }
 
