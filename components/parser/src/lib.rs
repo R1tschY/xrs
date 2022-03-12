@@ -102,6 +102,9 @@ impl<'a> XmlEvent<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum XmlDtdError {}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum XmlError {
     ExpectedName,
     ExpectedElementStart,
@@ -117,4 +120,5 @@ pub enum XmlError {
     ExpectToken(&'static str),
     IllegalAttributeValue(&'static str),
     UnsupportedEncoding(String),
+    DtdError(XmlDtdError),
 }
