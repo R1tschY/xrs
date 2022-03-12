@@ -19,7 +19,11 @@ impl<'a, T: Parser<'a>> Parser<'a> for Lexeme<'a, T> {
     }
 }
 
-struct Optional<T>(T);
+pub fn optional<'a, T: Parser<'a>>(parser: T) -> Optional<T> {
+    Optional(parser)
+}
+
+pub struct Optional<T>(T);
 
 impl<'a, T: Parser<'a>> Parser<'a> for Optional<T> {
     type Attribute = Option<T::Attribute>;
@@ -33,7 +37,11 @@ impl<'a, T: Parser<'a>> Parser<'a> for Optional<T> {
     }
 }
 
-struct Kleene<T>(T);
+pub fn kleene<'a, T: Parser<'a>>(parser: T) -> Kleene<T> {
+    Kleene(parser)
+}
+
+pub struct Kleene<T>(T);
 
 impl<'a, T: Parser<'a>> Parser<'a> for Kleene<T> {
     type Attribute = Vec<T::Attribute>;
@@ -49,7 +57,11 @@ impl<'a, T: Parser<'a>> Parser<'a> for Kleene<T> {
     }
 }
 
-struct Plus<T>(T);
+pub fn plus<'a, T: Parser<'a>>(parser: T) -> Plus<T> {
+    Plus(parser)
+}
+
+pub struct Plus<T>(T);
 
 impl<'a, T: Parser<'a>> Parser<'a> for Plus<T> {
     type Attribute = Vec<T::Attribute>;
@@ -69,23 +81,28 @@ impl<'a, T: Parser<'a>> Parser<'a> for Plus<T> {
     }
 }
 
-#[inline]
-pub fn seq2<'a, T1: Parser<'a, Error = E>, T2: Parser<'a, Error = E>, E>(
-    parser1: T1,
-    parser2: T2,
-) -> Sequence2<T1, T2> {
-    Sequence2(parser1, parser2)
+macro_rules! def_seq {
+    ($($i:tt: $t:ident),+ $(,)?) => {
+        impl<
+                'a,
+                $($t: Parser<'a, Error = E>),*,
+                E,
+            > Parser<'a> for ($($t),*,)
+        {
+            type Attribute = ($($t::Attribute),*,);
+            type Error = E;
+
+            #[allow(non_snake_case)]
+            fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+                $(let ($t, cur) = self.$i.parse(cur)?;)*
+                Ok((($($t),*,), cur))
+            }
+        }
+    };
 }
 
-pub struct Sequence2<T1, T2>(T1, T2);
-
-impl<'a, T1: Parser<'a, Error = E>, T2: Parser<'a, Error = E>, E> Parser<'a> for Sequence2<T1, T2> {
-    type Attribute = (T1::Attribute, T2::Attribute);
-    type Error = E;
-
-    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        let (v1, cur) = self.0.parse(cur)?;
-        let (v2, cur) = self.1.parse(cur)?;
-        Ok(((v1, v2), cur))
-    }
-}
+def_seq!(0: T1);
+def_seq!(0: T1, 1: T2);
+def_seq!(0: T1, 1: T2, 2: T3);
+def_seq!(0: T1, 1: T2, 2: T3, 3: T4);
+def_seq!(0: T1, 1: T2, 2: T3, 3: T4, 4: T5);

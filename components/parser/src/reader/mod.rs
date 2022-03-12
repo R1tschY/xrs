@@ -2,11 +2,20 @@ use std::marker::PhantomData;
 
 use xml_chars::{XmlAsciiChar, XmlChar};
 
-use crate::parser::core::{lexeme, seq2};
+use crate::parser::core::{kleene, lexeme, optional, plus, Plus};
 use crate::parser::helper::map_error;
 use crate::parser::string::{char_, lit};
 use crate::parser::Parser;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent};
+
+pub mod dtd;
+
+// Common
+
+#[inline]
+pub fn xml_lit<'a>(literal: &'static str) -> impl Parser<'a, Attribute = (), Error = XmlError> {
+    map_error(lit(literal), move |_| XmlError::ExpectToken(literal))
+}
 
 // XML
 
@@ -104,13 +113,12 @@ impl<'a> Parser<'a> for XmlDeclToken {
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
-        let (_, cursor) =
-            map_error(lit("<?xml"), |_| XmlError::ExpectToken("<?xml")).parse(cursor)?;
+        let (_, cursor) = xml_lit("<?xml").parse(cursor)?;
         let (version, cursor) = VersionInfoToken.parse(cursor)?;
-        let (encoding, cursor) = Optional(EncodingDeclToken).parse(cursor)?;
-        let (standalone, cursor) = Optional(SDDeclToken).parse(cursor)?;
-        let (_, cursor) = Optional(SToken).parse(cursor)?;
-        let (_, cursor) = map_error(lit("?>"), |_| XmlError::ExpectToken("?>")).parse(cursor)?;
+        let (encoding, cursor) = optional(EncodingDeclToken).parse(cursor)?;
+        let (standalone, cursor) = optional(SDDeclToken).parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (_, cursor) = xml_lit("?>").parse(cursor)?;
 
         Ok((
             XmlDecl {
@@ -159,7 +167,7 @@ impl<'a> Parser<'a> for EqToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
         let (_, cursor) = SToken.parse(cursor)?;
-        let (_, cursor) = map_error(lit("="), |_| XmlError::ExpectToken("=")).parse(cursor)?;
+        let (_, cursor) = xml_lit("=").parse(cursor)?;
         SToken.parse(cursor)
     }
 }
@@ -172,7 +180,7 @@ impl<'a> Parser<'a> for VersionNumToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
         map_error(
-            lexeme(seq2(lit("1."), Plus(char_(|c: char| c.is_ascii_digit())))),
+            lexeme((lit("1."), plus(char_(|c: char| c.is_ascii_digit())))),
             |_| XmlError::ExpectToken("1.[0-9]+"),
         )
         .parse(cursor)
@@ -194,7 +202,7 @@ impl<'a> Parser<'a> for SDDeclToken {
 
         let (yes_no, cursor) = if cursor.next_byte(0) == Some(b'\'') {
             let cursor = cursor.advance(1);
-            let (yes_no, cursor) = map_error(lexeme(Plus(char_(|c: char| c != '\''))), |_| {
+            let (yes_no, cursor) = map_error(lexeme(plus(char_(|c: char| c != '\''))), |_| {
                 XmlError::ExpectToken("'yes' | 'no'")
             })
             .parse(cursor)?;
@@ -202,7 +210,7 @@ impl<'a> Parser<'a> for SDDeclToken {
             (yes_no, cursor)
         } else if cursor.next_byte(0) == Some(b'\"') {
             let cursor = cursor.advance(1);
-            let (yes_no, cursor) = map_error(lexeme(Plus(char_(|c: char| c != '\"'))), |_| {
+            let (yes_no, cursor) = map_error(lexeme(plus(char_(|c: char| c != '\"'))), |_| {
                 XmlError::ExpectToken("'yes' | 'no'")
             })
             .parse(cursor)?;
@@ -259,9 +267,9 @@ impl<'a> Parser<'a> for EncNameToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
         map_error(
-            lexeme(seq2(
+            lexeme((
                 char_(|c: char| c.is_ascii_alphabetic()),
-                Kleene(char_(|c: char| {
+                kleene(char_(|c: char| {
                     c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'
                 })),
             )),
