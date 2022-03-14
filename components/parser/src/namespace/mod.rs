@@ -1,4 +1,5 @@
 use crate::{XmlDecl, XmlError};
+use std::borrow::Cow;
 use std::fmt;
 use std::str::{from_utf8, FromStr, ParseBoolError};
 use std::sync::Arc;
@@ -117,5 +118,5 @@ pub enum XmlNsEvent<'a> {
     XmlDecl(XmlDecl<'a>),
     STag(NsSTag<'a>),
     ETag(NsETag<'a>),
-    Characters(&'a str),
+    Characters(Cow<'a, str>),
 }

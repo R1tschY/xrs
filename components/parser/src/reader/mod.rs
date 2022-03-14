@@ -1,3 +1,5 @@
+//! XML Pull Reader
+
 use std::marker::PhantomData;
 
 use xml_chars::{XmlAsciiChar, XmlChar};
@@ -6,6 +8,8 @@ use crate::parser::core::{kleene, lexeme, optional, plus, Plus};
 use crate::parser::helper::map_error;
 use crate::parser::string::{char_, lit};
 use crate::parser::Parser;
+use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
+use crate::XmlEvent::Characters;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent};
 
 pub mod dtd;
@@ -19,6 +23,10 @@ pub fn xml_lit<'a>(literal: &'static str) -> impl Parser<'a, Attribute = (), Err
 
 // XML
 
+// 2.3 Common Syntactic Constructs
+
+/// White Space
+/// S ::= (#x20 | #x9 | #xD | #xA)+
 struct SToken;
 
 impl<'a> Parser<'a> for SToken {
@@ -372,10 +380,31 @@ impl<'a> Reader<'a> {
                         Err(XmlError::ExpectedElementStart)
                     }
                 }
-                _ if c.is_xml_whitespace() => self.cursor = self.cursor.advance(1),
                 _ => {
-                    println!("{}", c);
-                    todo!()
+                    return if self.depth == 0 {
+                        // only white space allowed
+                        if c.is_xml_whitespace() {
+                            let (_, cur) = SToken.parse(self.cursor)?;
+                            self.cursor = cur;
+                            continue;
+                        } else {
+                            Err(UnexpectedCharacter(self.cursor.next_char().unwrap()))
+                        }
+                    } else {
+                        if let Some((i, _)) = self
+                            .cursor
+                            .rest_bytes()
+                            .iter()
+                            .enumerate()
+                            .find(|(i, &c)| c == b'<')
+                        {
+                            let (chars, cur) = self.cursor.advance2(i);
+                            self.cursor = cur;
+                            Ok(Some(Characters(chars.into())))
+                        } else {
+                            Err(UnexpectedEof)
+                        }
+                    };
                 }
             };
         }
@@ -659,5 +688,41 @@ mod tests {
         );
         assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
         assert_evt!(Ok(None), reader);
+    }
+
+    mod characters {
+        use crate::reader::Reader;
+        use crate::{XmlError, XmlEvent};
+
+        #[test]
+        fn parse_chars() {
+            let mut reader = Reader::new("<e>abc</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("abc"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn fail_on_chars_in_prolog() {
+            let mut reader = Reader::new("abc <e/>");
+            assert_evt!(Err(XmlError::UnexpectedCharacter('a')), reader);
+        }
+
+        #[test]
+        fn fail_on_chars_in_epilog() {
+            let mut reader = Reader::new("<e/>abc");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Err(XmlError::UnexpectedCharacter('a')), reader);
+        }
+
+        #[test]
+        fn parse_chars() {
+            let mut reader = Reader::new("<e>abc</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("abc"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
     }
 }

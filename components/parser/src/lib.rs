@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use parser::cursor::Cursor;
+use std::borrow::Cow;
 use std::fmt::Formatter;
 use std::fs::read_to_string;
 use std::str::from_utf8;
@@ -80,7 +81,7 @@ pub enum XmlEvent<'a> {
     XmlDecl(XmlDecl<'a>),
     STag(STag<'a>),
     ETag(ETag<'a>),
-    Characters(&'a str),
+    Characters(Cow<'a, str>),
 }
 
 impl<'a> XmlEvent<'a> {
@@ -94,6 +95,10 @@ impl<'a> XmlEvent<'a> {
 
     pub fn stag(name: &'a str, empty: bool) -> Self {
         XmlEvent::STag(STag { name, empty })
+    }
+
+    pub fn characters(chars: impl Into<Cow<'a, str>>) -> Self {
+        XmlEvent::Characters(chars.into())
     }
 
     pub fn etag(name: &'a str) -> Self {
@@ -121,4 +126,5 @@ pub enum XmlError {
     IllegalAttributeValue(&'static str),
     UnsupportedEncoding(String),
     DtdError(XmlDtdError),
+    UnexpectedCharacter(char),
 }

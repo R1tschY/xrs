@@ -1,3 +1,5 @@
+//! Parser framework
+
 use crate::Cursor;
 
 pub mod core;
