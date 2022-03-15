@@ -164,8 +164,8 @@ impl Default for Recommendation {
 }
 
 pub trait TestableParser {
-    fn is_wf(&self, input: &[u8]) -> bool;
-    fn canonxml(&self, input: &[u8]) -> Result<String, Box<dyn Debug>>;
+    fn is_wf(&self, input: &[u8], namespace: bool) -> bool;
+    fn canonxml(&self, input: &[u8], namespace: bool) -> Result<String, Box<dyn Debug>>;
 }
 
 pub struct XmlTester {
@@ -234,17 +234,22 @@ impl XmlTester {
         let path = base.join(&test.uri);
         let content = fs::read(path).unwrap();
         let mut success = match test.ty {
-            Type::Valid => parser.is_wf(&content),
-            Type::Invalid => parser.is_wf(&content),
+            Type::Valid => parser.is_wf(&content, test.namespace.into()),
+            Type::Invalid => parser.is_wf(&content, test.namespace.into()),
             Type::Error => return,
-            Type::NotWf => !parser.is_wf(&content),
+            Type::NotWf => !parser.is_wf(&content, test.namespace.into()),
         };
         if let Some(output) = &test.output {
-            match parser.canonxml(&content) {
+            match parser.canonxml(&content, test.namespace.into()) {
                 Ok(out) => {
                     let out_path = base.join(&output);
                     let out_content = fs::read(out_path).unwrap();
                     if out.as_bytes() != out_content {
+                        println!(
+                            "{:?} != {:?}",
+                            out,
+                            std::str::from_utf8(&out_content).unwrap()
+                        );
                         success = false;
                     }
                 }
