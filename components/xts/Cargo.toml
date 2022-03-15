@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde-explicit-xml = { git = "https://github.com/R1tschY/serde_xml_adapt.git", rev = "43be503a7de3"}
+xserde = { git = "https://github.com/R1tschY/serde_xml_adapt.git", rev = "9caf74413926c21d31190462b4d74aeb28730a79"}
 xml-dom = { path = "../dom" }
 
 [dev-dependencies]

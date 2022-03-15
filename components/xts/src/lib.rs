@@ -3,11 +3,11 @@ use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use serde::export::fmt::Debug;
 use serde::Deserialize;
-use serde_explicit_xml::from_reader;
 use std::error::Error;
+use std::fmt::Debug;
 use std::fs;
+use xserde::from_reader;
 
 #[derive(Deserialize)]
 #[serde(rename = "TESTSUITE")]
