@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use std::error::Error;
 use std::fmt::Debug;
-use std::fs;
+use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::{fs, panic};
 use xserde::from_reader;
 
 #[derive(Deserialize)]
@@ -179,7 +180,7 @@ impl XmlTester {
         }
     }
 
-    pub fn test(&self, parser: &dyn TestableParser) -> XmlConfirmReport {
+    pub fn test(&self, parser: &(dyn TestableParser + RefUnwindSafe)) -> XmlConfirmReport {
         let file = File::open(self.xmlts_root.join("xmlconf.complete.xml")).unwrap();
         let test_suite: TestSuite = from_reader(BufReader::new(file)).unwrap();
         let mut report = XmlConfirmReport::new(&test_suite.profile);
@@ -197,7 +198,7 @@ impl XmlTester {
     fn process_test_cases(
         &self,
         report: &mut XmlConfirmReport,
-        parser: &dyn TestableParser,
+        parser: &(dyn TestableParser + RefUnwindSafe),
         tcs: &[TestCases],
         base: &Path,
     ) {
@@ -227,37 +228,47 @@ impl XmlTester {
     fn process_test(
         &self,
         report: &mut XmlConfirmReport,
-        parser: &dyn TestableParser,
+        parser: &(dyn TestableParser + RefUnwindSafe),
         test: &Test,
         base: &Path,
     ) {
-        let path = base.join(&test.uri);
-        let content = fs::read(path).unwrap();
-        let mut success = match test.ty {
-            Type::Valid => parser.is_wf(&content, test.namespace.into()),
-            Type::Invalid => parser.is_wf(&content, test.namespace.into()),
-            Type::Error => return,
-            Type::NotWf => !parser.is_wf(&content, test.namespace.into()),
-        };
-        if let Some(output) = &test.output {
-            match parser.canonxml(&content, test.namespace.into()) {
-                Ok(out) => {
-                    let out_path = base.join(&output);
-                    let out_content = fs::read(out_path).unwrap();
-                    if out.as_bytes() != out_content {
-                        println!(
-                            "{:?} != {:?}",
-                            out,
-                            std::str::from_utf8(&out_content).unwrap()
-                        );
+        let result = panic::catch_unwind(|| {
+            let path = base.join(&test.uri);
+            let content = fs::read(path).unwrap();
+            let mut success = match test.ty {
+                Type::Valid => parser.is_wf(&content, test.namespace.into()),
+                Type::Invalid => parser.is_wf(&content, test.namespace.into()),
+                Type::Error => return false,
+                Type::NotWf => !parser.is_wf(&content, test.namespace.into()),
+            };
+            if let Some(output) = &test.output {
+                match parser.canonxml(&content, test.namespace.into()) {
+                    Ok(out) => {
+                        let out_path = base.join(&output);
+                        let out_content = fs::read(out_path).unwrap();
+                        if out.as_bytes() != out_content {
+                            println!(
+                                "{:?} != {:?}",
+                                out,
+                                std::str::from_utf8(&out_content).unwrap()
+                            );
+                            success = false;
+                        }
+                    }
+                    Err(_err) => {
                         success = false;
                     }
                 }
-                Err(_err) => {
-                    success = false;
-                }
             }
-        }
+            success
+        });
+        let success = match result {
+            Ok(success) => success,
+            Err(err) => {
+                println!("{}: PANIC: {:?}", test.uri, err);
+                false
+            }
+        };
 
         report.results.push(XmlTestResult {
             name: test.uri.to_string(),

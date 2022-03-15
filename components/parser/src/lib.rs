@@ -17,11 +17,27 @@ pub mod parser;
 mod reader;
 mod shufti;
 
+pub use reader::Reader;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct XmlDecl<'a> {
     version: &'a str,
     encoding: Option<&'a str>,
     standalone: Option<bool>,
+}
+
+impl<'a> XmlDecl<'a> {
+    pub fn version(&self) -> &'a str {
+        self.version
+    }
+
+    pub fn encoding(&self) -> Option<&'a str> {
+        self.encoding
+    }
+
+    pub fn standalone(&self) -> Option<bool> {
+        self.standalone
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
