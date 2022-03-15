@@ -231,7 +231,6 @@ impl XmlTester {
         test: &Test,
         base: &Path,
     ) {
-        println!("##   Test case: {} {}", test.id, test.uri);
         let path = base.join(&test.uri);
         let content = fs::read(path).unwrap();
         let mut success = match test.ty {
@@ -255,13 +254,13 @@ impl XmlTester {
             }
         }
 
-        report.test_count += 1;
-        if !success {
-            report.failed.push(XmlTestFailure {
-                name: test.uri.to_string(),
-                description: test.description[0].replace('\n', " "),
-            });
-        }
+        report.results.push(XmlTestResult {
+            name: test.uri.to_string(),
+            description: test.description[0].replace('\n', " "),
+            ty: test.ty,
+            namespace: test.namespace.into(),
+            success,
+        });
 
         report.statistic.inc_result(success);
         report
@@ -272,9 +271,12 @@ impl XmlTester {
     }
 }
 
-pub struct XmlTestFailure {
+pub struct XmlTestResult {
     pub name: String,
     pub description: String,
+    pub ty: Type,
+    pub namespace: bool,
+    pub success: bool,
 }
 
 #[derive(Clone)]
@@ -308,8 +310,7 @@ impl Default for TestStatistic {
 
 pub struct XmlConfirmReport {
     pub name: String,
-    pub failed: Vec<XmlTestFailure>,
-    pub test_count: usize,
+    pub results: Vec<XmlTestResult>,
 
     pub subtests: Vec<XmlConfirmReport>,
 
@@ -321,8 +322,7 @@ impl XmlConfirmReport {
     fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            failed: Vec::new(),
-            test_count: 0,
+            results: Vec::new(),
             subtests: Vec::new(),
             statistic: TestStatistic::default(),
             type_statistic: HashMap::default(),
@@ -337,6 +337,78 @@ impl XmlConfirmReport {
         );
     }
 
+    fn print_single_statistic(name: &'static str, stat: &TestStatistic) {
+        let success = stat.count - stat.failed;
+        println!(
+            "{:20}: {:5} / {:5} ({:3.2}%)",
+            name,
+            success,
+            stat.count,
+            if stat.count > 0 {
+                (success as f32) / (stat.count as f32) * 100.0
+            } else {
+                0.0
+            }
+        );
+    }
+
+    pub fn print_statistic(&self) {
+        println!(
+            "{} ({}/{})",
+            self.name,
+            self.statistic.count - self.statistic.failed,
+            self.statistic.count
+        );
+        println!();
+
+        let mut failures_by_type = HashMap::new();
+        self.compute_failures_by_type(&mut failures_by_type);
+        println!("FAILURES BY TYPE");
+        println!("----------------\n");
+        Self::print_single_statistic(
+            "NOT-WF",
+            failures_by_type
+                .get(&Type::NotWf)
+                .unwrap_or(&TestStatistic::default()),
+        );
+        Self::print_single_statistic(
+            "Valid",
+            failures_by_type
+                .get(&Type::Valid)
+                .unwrap_or(&TestStatistic::default()),
+        );
+        Self::print_single_statistic(
+            "Invalid",
+            failures_by_type
+                .get(&Type::Invalid)
+                .unwrap_or(&TestStatistic::default()),
+        );
+        Self::print_single_statistic(
+            "Error",
+            failures_by_type
+                .get(&Type::Error)
+                .unwrap_or(&TestStatistic::default()),
+        );
+        println!();
+
+        let mut failures_by_namespace = HashMap::new();
+        self.compute_failures_by_namespace(&mut failures_by_namespace);
+        println!("FAILURES BY NAMESPACE");
+        println!("---------------------\n");
+        Self::print_single_statistic(
+            "NAMESPACE",
+            failures_by_namespace
+                .get(&true)
+                .unwrap_or(&TestStatistic::default()),
+        );
+        Self::print_single_statistic(
+            "NO NAMESPACE",
+            failures_by_namespace
+                .get(&false)
+                .unwrap_or(&TestStatistic::default()),
+        );
+    }
+
     pub fn print(&self) {
         let mut res = String::new();
         self.print_internal(&mut res, 0);
@@ -348,7 +420,7 @@ impl XmlConfirmReport {
 
         write!(
             writer,
-            "{}|- {} ({}/{})\n",
+            "{}- {} ({}/{})\n",
             " ".repeat(indention),
             self.name,
             self.statistic.count - self.statistic.failed,
@@ -359,13 +431,45 @@ impl XmlConfirmReport {
             report.print_internal(writer, indention + 2);
         }
 
-        for failed in &self.failed {
-            write!(
-                writer,
-                "{}|- FAILED: {}\n",
-                " ".repeat(indention + 2),
-                failed.name,
-            );
+        for result in &self.results {
+            if !result.success {
+                write!(
+                    writer,
+                    "{}- FAILED: {}\n",
+                    " ".repeat(indention + 2),
+                    result.name,
+                );
+            }
+        }
+    }
+
+    fn compute_failures_by_type(&self, failures: &mut HashMap<Type, TestStatistic>) {
+        use std::fmt::Write;
+
+        for result in &self.results {
+            failures
+                .entry(result.ty)
+                .or_insert(TestStatistic::default())
+                .inc_result(result.success);
+        }
+
+        for report in &self.subtests {
+            report.compute_failures_by_type(failures)
+        }
+    }
+
+    fn compute_failures_by_namespace(&self, failures: &mut HashMap<bool, TestStatistic>) {
+        use std::fmt::Write;
+
+        for result in &self.results {
+            failures
+                .entry(result.namespace)
+                .or_insert(TestStatistic::default())
+                .inc_result(result.success);
+        }
+
+        for report in &self.subtests {
+            report.compute_failures_by_namespace(failures)
         }
     }
 }

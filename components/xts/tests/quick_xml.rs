@@ -71,7 +71,7 @@ impl QuickXmlIT {
                 Event::PI(text) => {
                     write!(writer, "<?{}?>", reader.decode(text.escaped())?);
                 }
-                Event::DocType(text) => {}
+                Event::DocType(_) => {}
             }
         }
     }
@@ -112,6 +112,6 @@ impl TestableParser for QuickXmlIT {
 #[test]
 fn main() {
     let report = XmlTester::new().test(&QuickXmlIT);
-    report.print();
+    report.print_statistic();
     report.assert();
 }
