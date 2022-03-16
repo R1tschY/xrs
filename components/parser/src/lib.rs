@@ -9,7 +9,7 @@ use std::{fmt, io};
 use xml_chars::XmlAsciiChar;
 use xml_chars::XmlChar;
 
-use crate::XmlError::{ExpectedElementEnd, ExpectedName};
+use crate::XmlError::{ExpectedElementEnd, IllegalNameStartChar};
 
 mod dtd;
 mod namespace;
@@ -146,12 +146,17 @@ impl<'a> XmlEvent<'a> {
     pub fn etag(name: &'a str) -> Self {
         XmlEvent::ETag(ETag { name })
     }
+
+    pub fn pi(target: &'a str, data: &'a str) -> Self {
+        XmlEvent::PI(PI { target, data })
+    }
 }
 
 /// Fatal parsing error
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlError {
-    ExpectedName,
+    IllegalNameStartChar(char),
+    IllegalChar(char),
     ExpectedElementStart,
     ExpectedElementEnd,
     ExpectedAttrName,
@@ -160,12 +165,18 @@ pub enum XmlError {
     ExpectedDocumentEnd,
     UnexpectedEof,
     OpenElementAtEof,
-    NonUniqueAttribute { attribute: String },
-    IllegalName { name: String },
+    NonUniqueAttribute {
+        attribute: String,
+    },
+    IllegalName {
+        name: String,
+    },
     ExpectToken(&'static str),
     IllegalAttributeValue(&'static str),
     UnsupportedEncoding(String),
     DtdError(XmlDtdError),
+    /// Processing Instruction target should not be `xml` (case-insensitive)
+    InvalidPITarget,
     UnexpectedCharacter(char),
 }
 

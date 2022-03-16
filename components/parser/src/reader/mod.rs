@@ -11,7 +11,7 @@ use crate::parser::Parser;
 use crate::reader::dtd::DocTypeDeclToken;
 use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::XmlEvent::Characters;
-use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent};
+use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent, PI};
 
 pub mod dtd;
 
@@ -20,6 +20,25 @@ pub mod dtd;
 #[inline]
 pub fn xml_lit<'a>(literal: &'static str) -> impl Parser<'a, Attribute = (), Error = XmlError> {
     map_error(lit(literal), move |_| XmlError::ExpectToken(literal))
+}
+
+struct TerminatedChars(&'static str);
+
+impl<'a> Parser<'a> for TerminatedChars {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Some(pos) = cursor.rest().find(self.0) {
+            let res = cursor.advance2(pos);
+            if let Some(c) = res.0.chars().find(|c| !c.is_xml_char()) {
+                return Err(XmlError::IllegalChar(c));
+            }
+            Ok(res)
+        } else {
+            Err(XmlError::UnexpectedEof)
+        }
+    }
 }
 
 // XML
@@ -48,14 +67,16 @@ impl<'a> Parser<'a> for NameToken {
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
         let mut chars = cursor.rest().char_indices();
 
-        if !matches!(chars.next(), Some((_, c)) if c.is_xml_name_start_char()) {
-            return Err(XmlError::ExpectedName);
+        match chars.next() {
+            Some((_, c)) if c.is_xml_name_start_char() => {}
+            Some((_, c)) => return Err(XmlError::IllegalNameStartChar(c)),
+            None => return Err(XmlError::UnexpectedEof),
         }
 
         if let Some((i, _)) = chars.find(|(_, c)| !c.is_xml_name_char()) {
             Ok(cursor.advance2(i))
         } else {
-            Err(XmlError::ExpectedElementEnd)
+            Err(XmlError::UnexpectedEof)
         }
     }
 }
@@ -110,6 +131,36 @@ impl<'a> Parser<'a> for EqLiteralToken {
         } else {
             Err(XmlError::ExpectedEquals)
         }
+    }
+}
+
+// 2.6 Processing Instructions
+
+/// Processing Instruction
+/// PI ::= '<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
+/// PITarget ::= Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
+struct PIToken;
+
+impl<'a> Parser<'a> for PIToken {
+    type Attribute = PI<'a>;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) = xml_lit("<?").parse(cursor)?;
+        let (target, cursor) = NameToken.parse(cursor)?;
+        if target.eq_ignore_ascii_case("xml") {
+            return Err(XmlError::InvalidPITarget);
+        }
+        let (maybe_data, cursor) = optional((SToken, TerminatedChars("?>"))).parse(cursor)?;
+        let (_, cursor) = xml_lit("?>").parse(cursor)?;
+
+        Ok((
+            PI {
+                target,
+                data: maybe_data.map(|data| data.1).unwrap_or(""),
+            },
+            cursor,
+        ))
     }
 }
 
@@ -368,10 +419,14 @@ impl<'a> Reader<'a> {
                             self.parse_etag()
                         } else if c == b'?' {
                             if self.is_prolog() && self.version.is_none() {
-                                self.parse_decl()
+                                // TODO: not correct
+                                if self.cursor.has_next_str("<?xml") {
+                                    self.parse_decl()
+                                } else {
+                                    self.parse_pi()
+                                }
                             } else {
-                                self.cursor = self.cursor.advance(2);
-                                todo!()
+                                self.parse_pi()
                             }
                         } else if c == b'!' {
                             self.parse_doctypedecl()
@@ -381,7 +436,7 @@ impl<'a> Reader<'a> {
                         }
                     } else {
                         Err(XmlError::ExpectedElementStart)
-                    }
+                    };
                 }
                 _ => {
                     return if self.depth == 0 {
@@ -518,7 +573,16 @@ impl<'a> Reader<'a> {
 
     fn parse_doctypedecl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let (decl, cursor) = DocTypeDeclToken.parse(self.cursor)?;
+
+        self.cursor = cursor;
         Ok(Some(XmlEvent::Dtd(decl)))
+    }
+
+    fn parse_pi(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (pi, cursor) = PIToken.parse(self.cursor)?;
+
+        self.cursor = cursor;
+        Ok(Some(XmlEvent::PI(pi)))
     }
 }
 
@@ -531,6 +595,16 @@ mod tests {
     macro_rules! assert_evt {
         ($exp:expr, $reader:expr) => {
             assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor.offset())
+        };
+    }
+
+    macro_rules! assert_evt_matches {
+        ($exp:pat, $reader:expr) => {
+            assert!(
+                matches!($reader.next(), $exp),
+                "error at {}",
+                $reader.cursor.offset()
+            )
         };
     }
 
@@ -723,14 +797,66 @@ mod tests {
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
             assert_evt!(Err(XmlError::UnexpectedCharacter('a')), reader);
         }
+    }
+
+    mod pi {
+        use crate::reader::Reader;
+        use crate::{XmlDecl, XmlError, XmlEvent};
 
         #[test]
-        fn parse_chars() {
-            let mut reader = Reader::new("<e>abc</e>");
-            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
-            assert_evt!(Ok(Some(XmlEvent::characters("abc"))), reader);
-            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+        fn parse_pi() {
+            let mut reader = Reader::new("<?e?>");
+            assert_evt!(Ok(Some(XmlEvent::pi("e", ""))), reader);
             assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn parse_pi_data() {
+            let mut reader = Reader::new("<?e abc=gdsfh ?>");
+            assert_evt!(Ok(Some(XmlEvent::pi("e", "abc=gdsfh "))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        #[ignore]
+        fn parse_pi_starting_with_xml_1() {
+            let mut reader = Reader::new("<?xml-abc?>");
+            assert_evt!(Ok(Some(XmlEvent::pi("xml-abc", ""))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn parse_pi_starting_with_xml_2() {
+            let mut reader = Reader::new("<?xml version='1.0'?><?xml-abc?>");
+            assert_evt_matches!(Ok(Some(XmlEvent::XmlDecl(_))), reader);
+            assert_evt!(Ok(Some(XmlEvent::pi("xml-abc", ""))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        #[ignore]
+        fn invalid_1() {
+            let mut reader = Reader::new("<?e/fsdg?>");
+            assert_evt!(
+                Err(XmlError::IllegalName {
+                    name: "e/fsdg".to_string()
+                }),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_target_name_1() {
+            let mut reader = Reader::new("<?xml version='1.0'?><?xml?>");
+            assert_evt_matches!(Ok(Some(XmlEvent::XmlDecl(_))), reader);
+            assert_evt!(Err(XmlError::InvalidPITarget), reader);
+        }
+
+        #[test]
+        fn invalid_target_name_2() {
+            let mut reader = Reader::new("<?xml version='1.0'?><?XmL?>");
+            assert_evt_matches!(Ok(Some(XmlEvent::XmlDecl(_))), reader);
+            assert_evt!(Err(XmlError::InvalidPITarget), reader);
         }
     }
 }
