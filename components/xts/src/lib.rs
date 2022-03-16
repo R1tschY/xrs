@@ -204,7 +204,7 @@ impl XmlTester {
     ) {
         for tc in tcs {
             let next_base = base.join(&tc.base);
-            println!("// Test case: {} {}", tc.base, tc.profile);
+            println!("# Test case: {} {}", tc.base, tc.profile);
 
             let mut subreport = XmlConfirmReport::new(&tc.profile);
             self.process_test_cases(&mut subreport, parser, &tc.test_cases, &next_base);
@@ -232,6 +232,8 @@ impl XmlTester {
         test: &Test,
         base: &Path,
     ) {
+        println!("## {}", test.uri);
+
         let result = panic::catch_unwind(|| {
             let path = base.join(&test.uri);
             let content = fs::read(path).unwrap();

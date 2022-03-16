@@ -17,8 +17,10 @@ pub mod parser;
 mod reader;
 mod shufti;
 
+use crate::dtd::DocTypeDecl;
 pub use reader::Reader;
 
+/// XML Declaration
 #[derive(Clone, Debug, PartialEq)]
 pub struct XmlDecl<'a> {
     version: &'a str,
@@ -40,6 +42,7 @@ impl<'a> XmlDecl<'a> {
     }
 }
 
+/// Start tag
 #[derive(Clone, Debug, PartialEq)]
 pub struct STag<'a> {
     name: &'a str,
@@ -52,6 +55,7 @@ impl<'a> STag<'a> {
     }
 }
 
+/// Attribute
 #[derive(Clone, PartialEq)]
 pub struct Attribute<'a> {
     name: &'a str,
@@ -81,6 +85,7 @@ impl<'a> fmt::Debug for Attribute<'a> {
     }
 }
 
+/// End tag
 #[derive(Clone, Debug, PartialEq)]
 pub struct ETag<'a> {
     name: &'a str,
@@ -92,12 +97,33 @@ impl<'a> ETag<'a> {
     }
 }
 
+/// Processing Instruction
+#[derive(Clone, Debug, PartialEq)]
+pub struct PI<'a> {
+    target: &'a str,
+    data: &'a str,
+}
+
+impl<'a> PI<'a> {
+    pub fn target(&self) -> &'a str {
+        self.target
+    }
+
+    pub fn data(&self) -> &'a str {
+        self.data
+    }
+}
+
+/// Event of Pull Parser
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlEvent<'a> {
     XmlDecl(XmlDecl<'a>),
+    Dtd(DocTypeDecl<'a>),
     STag(STag<'a>),
     ETag(ETag<'a>),
     Characters(Cow<'a, str>),
+    PI(PI<'a>),
+    Comment(&'a str),
 }
 
 impl<'a> XmlEvent<'a> {
@@ -122,9 +148,7 @@ impl<'a> XmlEvent<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum XmlDtdError {}
-
+/// Fatal parsing error
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlError {
     ExpectedName,
@@ -144,3 +168,7 @@ pub enum XmlError {
     DtdError(XmlDtdError),
     UnexpectedCharacter(char),
 }
+
+/// Fatal DTD parsing error
+#[derive(Clone, Debug, PartialEq)]
+pub enum XmlDtdError {}

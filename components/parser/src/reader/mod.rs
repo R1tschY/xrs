@@ -8,6 +8,7 @@ use crate::parser::core::{kleene, lexeme, optional, plus, Plus};
 use crate::parser::helper::map_error;
 use crate::parser::string::{char_, lit};
 use crate::parser::Parser;
+use crate::reader::dtd::DocTypeDeclToken;
 use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::XmlEvent::Characters;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent};
@@ -372,6 +373,8 @@ impl<'a> Reader<'a> {
                                 self.cursor = self.cursor.advance(2);
                                 todo!()
                             }
+                        } else if c == b'!' {
+                            self.parse_doctypedecl()
                         } else {
                             self.cursor = self.cursor.advance(1);
                             self.parse_stag()
@@ -511,6 +514,11 @@ impl<'a> Reader<'a> {
 
         self.cursor = cursor;
         Ok(Some(XmlEvent::XmlDecl(decl)))
+    }
+
+    fn parse_doctypedecl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (decl, cursor) = DocTypeDeclToken.parse(self.cursor)?;
+        Ok(Some(XmlEvent::Dtd(decl)))
     }
 }
 

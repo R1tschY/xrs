@@ -1,5 +1,5 @@
-use crate::dtd::DtdTypeDecl;
-use crate::parser::core::{optional, Optional};
+use crate::dtd::{DocTypeDecl, IntSubset, MarkupDeclEntry};
+use crate::parser::core::{kleene, optional, Kleene, Optional};
 use crate::parser::helper::map_error;
 use crate::parser::string::lit;
 use crate::parser::Parser;
@@ -13,7 +13,7 @@ use crate::{Cursor, XmlError};
 pub struct DocTypeDeclToken;
 
 impl<'a> Parser<'a> for DocTypeDeclToken {
-    type Attribute = DtdTypeDecl<'a>;
+    type Attribute = DocTypeDecl<'a>;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -21,21 +21,21 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
         // let (_, cursor) = xml_lit("<!DOCTYPE").parse(cursor)?;
         // let (_, cursor) = SToken.parse(cursor)?;
         // let (name, cursor) = NameToken.parse(cursor)?;
-        // let (_, cursor) = optional((SToken, ExternalIdToken)).parse(cursor)?;
+        // let ((_, external_id), cursor) = optional((SToken, ExternalIdToken)).parse(cursor)?;
         // let (_, cursor) = optional(SToken).parse(cursor)?;
         // let (_, cursor) = optional((xml_lit("["), IntSubsetToken, xml_lit("]"), optional(SToken)))
         //     .parse(cursor)?;
         // let (_, cursor) = xml_lit(">").parse(cursor)?;
         //
-        // Ok((DtdTypeDecl::new(name), cursor))
+        // Ok((DocTypeDecl::new(name), cursor))
     }
 }
 
 /// DeclSep ::= PEReference | S
-pub struct DeclSepToken;
+/*pub struct DeclSepToken;
 
 impl<'a> Parser<'a> for DeclSepToken {
-    type Attribute = DtdTypeDecl<'a>;
+    type Attribute = DocTypeDecl<'a>;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -49,11 +49,56 @@ impl<'a> Parser<'a> for DeclSepToken {
         // }
     }
 }
-
+*/
 // intSubset ::= (markupdecl | DeclSep)*
 // https://www.w3.org/TR/REC-xml/#NT-intSubset
 
-// markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
+pub struct IntSubsetToken;
+
+impl<'a> Parser<'a> for IntSubsetToken {
+    type Attribute = IntSubset<'a>;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        kleene(MarkupDeclToken)
+            .parse(cursor)
+            .map(|(decls, cursor)| (IntSubset::new(decls), cursor))
+    }
+}
+
+/// Parser for Markup Declaration or Declaration Seperator
+///
+/// markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
+/// DeclSep ::= PEReference | S
+pub struct MarkupDeclToken;
+
+impl<'a> Parser<'a> for MarkupDeclToken {
+    type Attribute = MarkupDeclEntry<'a>;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+
+        todo!()
+        // return if let Ok((pe_ref, cursor)) = PeReferenceToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::PEReference(pe_ref), cursor))
+        // } else if let Ok((element, cursor)) = ElementDeclToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::Element(element), cursor))
+        // } else if let Ok((att_list, cursor)) = AttListDeclToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::AttList(att_list), cursor))
+        // } else if let Ok((entity, cursor)) = EntityDeclToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::Entity(entity), cursor))
+        // } else if let Ok((notation, cursor)) = NotationDeclToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::Notation(notation), cursor))
+        // } else if let Ok((pi, cursor)) = PIToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::PI(pi), cursor))
+        // } else if let Ok((comment, cursor)) = CommentToken.parse(cursor) {
+        //     Ok((MarkupDeclEntry::Comment(comment), cursor))
+        // } else {
+        //     Err(XmlError::ExpectToken("markupdecl or DeclSep"))
+        // };
+    }
+}
 
 // 3.2 Element Type Declarations
 

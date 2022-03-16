@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Write};
-use xml_parser::{ETag, Reader, STag, XmlDecl, XmlError, XmlEvent};
+use xml_parser::{ETag, Reader, STag, XmlDecl, XmlError, XmlEvent, PI};
 use xml_xts::TestableParser;
 use xml_xts::XmlTester;
 
@@ -24,6 +24,11 @@ impl ReaderIT {
                 XmlEvent::Characters(chars) => {
                     result.push_str(chars.as_ref());
                 }
+                XmlEvent::PI(pi) => {
+                    self.write_pi(&mut result, pi)?;
+                }
+                XmlEvent::Dtd(_) => {}
+                XmlEvent::Comment(_) => {}
             }
         }
 
@@ -64,6 +69,11 @@ impl ReaderIT {
         write!(writer, "/>");
         Ok(())
     }
+
+    fn write_pi<'a>(&self, writer: &mut String, pi: PI<'a>) -> Result<(), XmlError> {
+        write!(writer, "<?{}{}?>", pi.target(), pi.data());
+        Ok(())
+    }
 }
 
 impl TestableParser for ReaderIT {
@@ -81,7 +91,8 @@ impl TestableParser for ReaderIT {
                 Ok(None) => {
                     return true;
                 }
-                Err(_) => {
+                Err(err) => {
+                    println!("      ERROR: {:?}", err);
                     return false;
                 }
             }

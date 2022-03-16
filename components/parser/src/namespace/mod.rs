@@ -1,4 +1,4 @@
-use crate::{XmlDecl, XmlError};
+use crate::{DocTypeDecl, XmlDecl, XmlError, PI};
 use std::borrow::Cow;
 use std::fmt;
 use std::str::{from_utf8, FromStr, ParseBoolError};
@@ -116,7 +116,10 @@ impl<'a> NsETag<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlNsEvent<'a> {
     XmlDecl(XmlDecl<'a>),
+    Dtd(DocTypeDecl<'a>),
     STag(NsSTag<'a>),
     ETag(NsETag<'a>),
     Characters(Cow<'a, str>),
+    PI(PI<'a>),
+    Comment(&'a str),
 }
