@@ -134,6 +134,25 @@ impl<'a> Parser<'a> for EqLiteralToken {
     }
 }
 
+// 2.5 Comments
+
+struct CommentToken;
+
+impl<'a> Parser<'a> for CommentToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) = xml_lit("<!--").parse(cursor)?;
+        let (comment, cursor) = TerminatedChars("--").parse(cursor)?;
+        dbg!(cursor);
+        let (_, cursor) =
+            map_error(xml_lit("-->"), |_| XmlError::CommentColonColon).parse(cursor)?;
+
+        Ok((comment, cursor))
+    }
+}
+
 // 2.6 Processing Instructions
 
 /// Processing Instruction
@@ -411,9 +430,9 @@ impl<'a> Reader<'a> {
         }
 
         while let Some(c) = self.cursor.next_byte(0) {
-            let evt = match c {
+            return match c {
                 b'<' => {
-                    return if let Some(c) = self.cursor.next_byte(1) {
+                    if let Some(c) = self.cursor.next_byte(1) {
                         if c == b'/' {
                             self.cursor = self.cursor.advance(2);
                             self.parse_etag()
@@ -429,17 +448,23 @@ impl<'a> Reader<'a> {
                                 self.parse_pi()
                             }
                         } else if c == b'!' {
-                            self.parse_doctypedecl()
+                            if self.cursor.has_next_str("<!--") {
+                                self.parse_comment()
+                            } else if self.cursor.has_next_str("<!DOCTYPE") {
+                                self.parse_doctypedecl()
+                            } else {
+                                Err(XmlError::ExpectedElementStart)
+                            }
                         } else {
                             self.cursor = self.cursor.advance(1);
                             self.parse_stag()
                         }
                     } else {
                         Err(XmlError::ExpectedElementStart)
-                    };
+                    }
                 }
                 _ => {
-                    return if self.depth == 0 {
+                    if self.depth == 0 {
                         // only white space allowed
                         if c.is_xml_whitespace() {
                             let (_, cur) = SToken.parse(self.cursor)?;
@@ -462,7 +487,7 @@ impl<'a> Reader<'a> {
                         } else {
                             Err(UnexpectedEof)
                         }
-                    };
+                    }
                 }
             };
         }
@@ -573,16 +598,20 @@ impl<'a> Reader<'a> {
 
     fn parse_doctypedecl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let (decl, cursor) = DocTypeDeclToken.parse(self.cursor)?;
-
         self.cursor = cursor;
         Ok(Some(XmlEvent::Dtd(decl)))
     }
 
     fn parse_pi(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let (pi, cursor) = PIToken.parse(self.cursor)?;
-
         self.cursor = cursor;
         Ok(Some(XmlEvent::PI(pi)))
+    }
+
+    fn parse_comment(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (comment, cursor) = CommentToken.parse(self.cursor)?;
+        self.cursor = cursor;
+        Ok(Some(XmlEvent::Comment(comment)))
     }
 }
 
@@ -799,6 +828,36 @@ mod tests {
         }
     }
 
+    mod comment {
+        use crate::reader::Reader;
+        use crate::{XmlDecl, XmlError, XmlEvent};
+
+        #[test]
+        fn parse_comment() {
+            let mut reader = Reader::new("<!-- declarations for <head> & <body> -->");
+            assert_evt!(
+                Ok(Some(XmlEvent::comment(
+                    " declarations for <head> & <body> "
+                ))),
+                reader
+            );
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn parse_empty_comment() {
+            let mut reader = Reader::new("<!---->");
+            assert_evt!(Ok(Some(XmlEvent::comment(""))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn parse_invalid_comment() {
+            let mut reader = Reader::new("<!-- B+, B, or B--->");
+            assert_evt!(Err(XmlError::CommentColonColon), reader);
+        }
+    }
+
     mod pi {
         use crate::reader::Reader;
         use crate::{XmlDecl, XmlError, XmlEvent};
@@ -857,6 +916,12 @@ mod tests {
             let mut reader = Reader::new("<?xml version='1.0'?><?XmL?>");
             assert_evt_matches!(Ok(Some(XmlEvent::XmlDecl(_))), reader);
             assert_evt!(Err(XmlError::InvalidPITarget), reader);
+        }
+
+        #[test]
+        fn missing_end() {
+            let mut reader = Reader::new("<?e abc=gdsfh");
+            assert_evt!(Err(XmlError::ExpectToken("?>")), reader);
         }
     }
 }

@@ -147,6 +147,10 @@ impl<'a> XmlEvent<'a> {
         XmlEvent::ETag(ETag { name })
     }
 
+    pub fn comment(comment: &'a str) -> Self {
+        XmlEvent::Comment(comment)
+    }
+
     pub fn pi(target: &'a str, data: &'a str) -> Self {
         XmlEvent::PI(PI { target, data })
     }
@@ -178,6 +182,7 @@ pub enum XmlError {
     /// Processing Instruction target should not be `xml` (case-insensitive)
     InvalidPITarget,
     UnexpectedCharacter(char),
+    CommentColonColon,
 }
 
 /// Fatal DTD parsing error
