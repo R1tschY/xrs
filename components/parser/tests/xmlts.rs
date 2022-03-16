@@ -55,18 +55,9 @@ impl ReaderIT {
     }
 
     fn write_decl<'a>(&self, writer: &mut String, decl: XmlDecl<'a>) -> Result<(), XmlError> {
-        write!(writer, "<?xml version=\"{}\"", decl.version());
-        if let Some(encoding) = decl.encoding() {
-            write!(writer, " encoding=\"{}\"", encoding);
+        if decl.version() != "1.0" {
+            write!(writer, "<?xml version=\"{}\"/>", decl.version());
         }
-        if let Some(standalone) = decl.standalone() {
-            write!(
-                writer,
-                " standalone=\"{}\"",
-                if standalone { "yes" } else { "no" }
-            );
-        }
-        write!(writer, "/>");
         Ok(())
     }
 

@@ -121,26 +121,13 @@ impl QuickXmlIT {
         writer: &mut String,
         decl: BytesDecl<'a>,
     ) -> Result<(), Error> {
-        write!(
-            writer,
-            "<?xml version=\"{}\"",
-            reader.decode(decl.version()?.as_ref())?
-        );
-        if let Some(encoding) = decl.encoding() {
+        if decl.version()?.as_ref() != b"1.0" {
             write!(
                 writer,
-                " encoding=\"{}\"",
-                reader.decode(encoding?.as_ref())?
+                "<?xml version=\"{}\"/>",
+                reader.decode(decl.version()?.as_ref())?
             );
         }
-        if let Some(standalone) = decl.standalone() {
-            write!(
-                writer,
-                " standalone=\"{}\"",
-                reader.decode(standalone?.as_ref())?
-            );
-        }
-        write!(writer, "/>");
         Ok(())
     }
 }
