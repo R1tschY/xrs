@@ -670,164 +670,191 @@ mod tests {
         &[]
     }
 
-    #[test]
-    fn single_element() {
-        let mut reader = Reader::new("<elem></elem>");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", false))), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
-        assert_evt!(Ok(None), reader);
+    mod stag {
+        use crate::reader::tests::empty_array;
+        use crate::reader::Reader;
+        use crate::{Attribute, XmlError, XmlEvent};
+
+        #[test]
+        fn single_element() {
+            let mut reader = Reader::new("<elem></elem>");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn single_element_whitespace() {
+            let mut reader = Reader::new("<elem  ></elem   >");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", false))), reader);
+            assert_eq!(empty_array::<Attribute>(), reader.attributes());
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn empty_element() {
+            let mut reader = Reader::new("<elem/>");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
+            assert_eq!(empty_array::<Attribute>(), reader.attributes());
+            assert_evt!(Ok(None), reader);
+        }
     }
 
-    #[test]
-    fn single_element_whitespace() {
-        let mut reader = Reader::new("<elem  ></elem   >");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", false))), reader);
-        assert_eq!(empty_array::<Attribute>(), reader.attributes());
-        assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
-        assert_evt!(Ok(None), reader);
+    mod attributes {
+        use crate::reader::Reader;
+        use crate::{Attribute, XmlError, XmlEvent};
+
+        #[test]
+        fn attribute() {
+            let mut reader = Reader::new("<elem attr=\"value\"/>");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
+            assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn attribute_whitespace() {
+            let mut reader = Reader::new("<elem \t \n \r attr  =  \"value\"  />");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
+            assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn single_quote_attribute() {
+            let mut reader = Reader::new("<elem attr='value'/>");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
+            assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn single_quote_attribute_whitespace() {
+            let mut reader = Reader::new("<elem attr  =  'value'  />");
+            assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
+            assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn multiple_attributes() {
+            let mut reader = Reader::new("<e a='v' b='w' />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(
+                &[Attribute::new("a", "v"), Attribute::new("b", "w")],
+                reader.attributes()
+            );
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn attribute_duplicate() {
+            let mut reader = Reader::new("<e a='' a='' />");
+            assert_evt!(
+                Err(XmlError::NonUniqueAttribute {
+                    attribute: "a".to_string()
+                }),
+                reader
+            );
+        }
     }
 
-    #[test]
-    fn empty_element() {
-        let mut reader = Reader::new("<elem/>");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
-        assert_eq!(empty_array::<Attribute>(), reader.attributes());
-        assert_evt!(Ok(None), reader);
+    mod etag {
+        use crate::reader::Reader;
+        use crate::{XmlError, XmlEvent};
+
+        #[test]
+        fn fail_on_missing_etag() {
+            let mut reader = Reader::new("<e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::OpenElementAtEof), reader);
+        }
+
+        #[test]
+        fn fail_on_open_etag() {
+            let mut reader = Reader::new("<e></e></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+        }
     }
 
-    #[test]
-    fn attribute() {
-        let mut reader = Reader::new("<elem attr=\"value\"/>");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
-        assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
-        assert_evt!(Ok(None), reader);
+    mod top_level_content {
+        use crate::reader::Reader;
+        use crate::{XmlError, XmlEvent};
+
+        #[test]
+        fn only_one_top_level_element_empty() {
+            let mut reader = Reader::new("<e/><e/>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+        }
+
+        #[test]
+        fn accept_whitespace_after_root() {
+            let mut reader = Reader::new("<e/> \r\t\n");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn only_one_top_level_element() {
+            let mut reader = Reader::new("<e></e><e/>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+        }
     }
 
-    #[test]
-    fn attribute_whitespace() {
-        let mut reader = Reader::new("<elem \t \n \r attr  =  \"value\"  />");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
-        assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
-        assert_evt!(Ok(None), reader);
-    }
+    mod decl {
+        use crate::reader::Reader;
+        use crate::{XmlError, XmlEvent};
 
-    #[test]
-    fn single_quote_attribute() {
-        let mut reader = Reader::new("<elem attr='value'/>");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
-        assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
-        assert_evt!(Ok(None), reader);
-    }
+        #[test]
+        fn parse_minimal_decl() {
+            let mut reader = Reader::new("<?xml version='1.0' ?><e/>");
+            assert_evt!(Ok(Some(XmlEvent::decl("1.0", None, None))), reader);
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(None), reader);
+        }
 
-    #[test]
-    fn single_quote_attribute_whitespace() {
-        let mut reader = Reader::new("<elem attr  =  'value'  />");
-        assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
-        assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
-        assert_evt!(Ok(None), reader);
-    }
+        #[test]
+        fn parse_full_decl() {
+            let mut reader =
+                Reader::new("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><e/>");
+            assert_evt!(
+                Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
+                reader
+            );
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(None), reader);
+        }
 
-    #[test]
-    fn multiple_attributes() {
-        let mut reader = Reader::new("<e a='v' b='w' />");
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_eq!(
-            &[Attribute::new("a", "v"), Attribute::new("b", "w")],
-            reader.attributes()
-        );
-        assert_evt!(Ok(None), reader);
-    }
+        #[test]
+        fn parse_decl_double_qoute() {
+            let mut reader =
+                Reader::new("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\" ?><e/>");
+            assert_evt!(
+                Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
+                reader
+            );
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(None), reader);
+        }
 
-    #[test]
-    fn attribute_duplicate() {
-        let mut reader = Reader::new("<e a='' a='' />");
-        assert_evt!(
-            Err(XmlError::NonUniqueAttribute {
-                attribute: "a".to_string()
-            }),
-            reader
-        );
-    }
-
-    #[test]
-    fn only_one_top_level_element() {
-        let mut reader = Reader::new("<e></e><e/>");
-        assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
-        assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
-    }
-
-    #[test]
-    fn fail_on_open_etag() {
-        let mut reader = Reader::new("<e></e></e>");
-        assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
-        assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
-        assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
-    }
-
-    #[test]
-    fn only_one_top_level_element_empty() {
-        let mut reader = Reader::new("<e/><e/>");
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
-    }
-
-    #[test]
-    fn accept_whitespace_after_root() {
-        let mut reader = Reader::new("<e/> \r\t\n");
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_evt!(Ok(None), reader);
-    }
-
-    #[test]
-    fn fail_on_open_stag() {
-        let mut reader = Reader::new("<e>");
-        assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
-        assert_evt!(Err(XmlError::OpenElementAtEof), reader);
-    }
-
-    #[test]
-    fn parse_minimal_decl() {
-        let mut reader = Reader::new("<?xml version='1.0' ?><e/>");
-        assert_evt!(Ok(Some(XmlEvent::decl("1.0", None, None))), reader);
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_evt!(Ok(None), reader);
-    }
-
-    #[test]
-    fn parse_full_decl() {
-        let mut reader =
-            Reader::new("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><e/>");
-        assert_evt!(
-            Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
-            reader
-        );
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_evt!(Ok(None), reader);
-    }
-
-    #[test]
-    fn parse_decl_double_qoute() {
-        let mut reader =
-            Reader::new("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\" ?><e/>");
-        assert_evt!(
-            Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
-            reader
-        );
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_evt!(Ok(None), reader);
-    }
-
-    #[test]
-    fn parse_decl_whitespace() {
-        let mut reader =
-            Reader::new("<?xml version =\t'1.0' encoding\n = \r'UTF-8' standalone =  'yes'?><e/>");
-        assert_evt!(
-            Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
-            reader
-        );
-        assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
-        assert_evt!(Ok(None), reader);
+        #[test]
+        fn parse_decl_whitespace() {
+            let mut reader = Reader::new(
+                "<?xml version =\t'1.0' encoding\n = \r'UTF-8' standalone =  'yes'?><e/>",
+            );
+            assert_evt!(
+                Ok(Some(XmlEvent::decl("1.0", Some("UTF-8"), Some(true)))),
+                reader
+            );
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(None), reader);
+        }
     }
 
     mod characters {
