@@ -168,6 +168,7 @@ pub enum XmlError {
     ExpectedEquals,
     ExpectedDocumentEnd,
     UnexpectedEof,
+    CDataEndInContent,
     OpenElementAtEof,
     NonUniqueAttribute {
         attribute: String,

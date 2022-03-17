@@ -17,17 +17,17 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        todo!()
-        // let (_, cursor) = xml_lit("<!DOCTYPE").parse(cursor)?;
-        // let (_, cursor) = SToken.parse(cursor)?;
-        // let (name, cursor) = NameToken.parse(cursor)?;
+        let (_, cursor) = xml_lit("<!DOCTYPE").parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (name, cursor) = NameToken.parse(cursor)?;
+
         // let ((_, external_id), cursor) = optional((SToken, ExternalIdToken)).parse(cursor)?;
         // let (_, cursor) = optional(SToken).parse(cursor)?;
         // let (_, cursor) = optional((xml_lit("["), IntSubsetToken, xml_lit("]"), optional(SToken)))
         //     .parse(cursor)?;
-        // let (_, cursor) = xml_lit(">").parse(cursor)?;
-        //
-        // Ok((DocTypeDecl::new(name), cursor))
+        let (_, cursor) = xml_lit(">").parse(cursor)?;
+
+        Ok((DocTypeDecl::new(name), cursor))
     }
 }
 

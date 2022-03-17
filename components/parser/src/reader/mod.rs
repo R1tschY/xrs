@@ -145,7 +145,6 @@ impl<'a> Parser<'a> for CommentToken {
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
         let (_, cursor) = xml_lit("<!--").parse(cursor)?;
         let (comment, cursor) = TerminatedChars("--").parse(cursor)?;
-        dbg!(cursor);
         let (_, cursor) =
             map_error(xml_lit("-->"), |_| XmlError::CommentColonColon).parse(cursor)?;
 
@@ -180,6 +179,28 @@ impl<'a> Parser<'a> for PIToken {
             },
             cursor,
         ))
+    }
+}
+
+// 2.7 CDATA Sections
+
+/// CDATA Section
+///
+/// CDSect  ::= CDStart CData CDEnd
+/// CDStart ::= '<![CDATA['
+/// CData   ::= (Char* - (Char* ']]>' Char*))
+/// CDEnd   ::= ']]>'
+struct CDataToken;
+
+impl<'a> Parser<'a> for CDataToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
+        let (_, cursor) = xml_lit("<![CDATA[").parse(cursor)?;
+        let (chars, cursor) = TerminatedChars("]]>").parse(cursor)?;
+        let (_, cursor) = xml_lit("]]>").parse(cursor)?;
+        Ok((chars, cursor))
     }
 }
 
@@ -452,6 +473,8 @@ impl<'a> Reader<'a> {
                                 self.parse_comment()
                             } else if self.cursor.has_next_str("<!DOCTYPE") {
                                 self.parse_doctypedecl()
+                            } else if self.cursor.has_next_str("<![CDATA[") {
+                                self.parse_cdata()
                             } else {
                                 Err(XmlError::ExpectedElementStart)
                             }
@@ -612,6 +635,12 @@ impl<'a> Reader<'a> {
         let (comment, cursor) = CommentToken.parse(self.cursor)?;
         self.cursor = cursor;
         Ok(Some(XmlEvent::Comment(comment)))
+    }
+
+    fn parse_cdata(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (cdata, cursor) = CDataToken.parse(self.cursor)?;
+        self.cursor = cursor;
+        Ok(Some(XmlEvent::Characters(cdata.into())))
     }
 }
 
@@ -826,6 +855,14 @@ mod tests {
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
             assert_evt!(Err(XmlError::UnexpectedCharacter('a')), reader);
         }
+
+        #[test]
+        #[ignore]
+        fn fail_on_cdata_section_end() {
+            let mut reader = Reader::new("<e>]]></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::CDataEndInContent), reader);
+        }
     }
 
     mod comment {
@@ -922,6 +959,59 @@ mod tests {
         fn missing_end() {
             let mut reader = Reader::new("<?e abc=gdsfh");
             assert_evt!(Err(XmlError::ExpectToken("?>")), reader);
+        }
+    }
+
+    mod cdata {
+        use crate::reader::Reader;
+        use crate::{XmlDecl, XmlError, XmlEvent};
+
+        #[test]
+        fn pass1() {
+            let mut reader = Reader::new("<e><![CDATA[<greeting>Hello, world!</greeting>]]></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Ok(Some(XmlEvent::characters(
+                    "<greeting>Hello, world!</greeting>"
+                ))),
+                reader
+            );
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn pass2() {
+            let mut reader = Reader::new("<e><![CDATA[]]]]></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("]]"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn pass3() {
+            let mut reader = Reader::new("<e><![CDATA[[]]]></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("[]"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn pass4() {
+            let mut reader = Reader::new("<e><![CDATA[]]></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters(""))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn fail1() {
+            let mut reader = Reader::new("<e><![CDATA[]></e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::UnexpectedEof), reader);
         }
     }
 }
