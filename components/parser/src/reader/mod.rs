@@ -412,7 +412,7 @@ pub struct Reader<'a> {
     cursor: Cursor<'a>,
     attributes: Vec<Attribute<'a>>,
     xml_lang: Option<&'a str>,
-    depth: usize,
+    stack: Vec<&'a str>,
     empty: bool,
     seen_root: bool,
     version: Option<&'a str>,
@@ -425,7 +425,7 @@ impl<'a> Reader<'a> {
             cursor: Cursor::from_str(input),
             attributes: Vec::with_capacity(4),
             xml_lang: None,
-            depth: 0,
+            stack: vec![],
             empty: false,
             seen_root: false,
             version: None,
@@ -446,7 +446,7 @@ impl<'a> Reader<'a> {
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         self.attributes.clear();
         if self.empty {
-            self.depth -= 1;
+            let _ = self.stack.pop();
             self.empty = false;
         }
 
@@ -487,7 +487,7 @@ impl<'a> Reader<'a> {
                     }
                 }
                 _ => {
-                    if self.depth == 0 {
+                    if self.stack.is_empty() {
                         // only white space allowed
                         if c.is_xml_whitespace() {
                             let (_, cur) = SToken.parse(self.cursor)?;
@@ -515,7 +515,7 @@ impl<'a> Reader<'a> {
             };
         }
 
-        if self.depth != 0 {
+        if !self.stack.is_empty() {
             Err(XmlError::OpenElementAtEof)
         } else {
             Ok(None)
@@ -523,7 +523,7 @@ impl<'a> Reader<'a> {
     }
 
     fn is_after_root(&self) -> bool {
-        self.depth == 0 && self.seen_root
+        self.stack.is_empty() && self.seen_root
     }
 
     fn parse_stag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
@@ -542,7 +542,7 @@ impl<'a> Reader<'a> {
                     self.cursor = self.cursor.advance(2);
                     self.empty = true;
                     self.seen_root = true;
-                    self.depth += 1;
+                    self.stack.push(name);
                     Ok(Some(XmlEvent::stag(name, true)))
                 } else {
                     Err(XmlError::ExpectedElementEnd)
@@ -554,7 +554,7 @@ impl<'a> Reader<'a> {
                 self.cursor = self.cursor.advance(1);
                 self.empty = false;
                 self.seen_root = true;
-                self.depth += 1;
+                self.stack.push(name);
                 return Ok(Some(XmlEvent::stag(name, false)));
             }
 
@@ -595,12 +595,23 @@ impl<'a> Reader<'a> {
             return Err(XmlError::ExpectedDocumentEnd);
         }
 
+        // TODO: xml_lit(self.stack.pop()) should be faster
         let (name, cursor) = NameToken.parse(self.cursor)?;
         let cursor = skip_whitespace(cursor);
         let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
         self.cursor = cursor;
-        self.depth -= 1;
-        Ok(Some(XmlEvent::ETag(ETag { name })))
+
+        if let Some(expected_name) = self.stack.pop() {
+            if expected_name == name {
+                Ok(Some(XmlEvent::ETag(ETag { name })))
+            } else {
+                Err(XmlError::WrongETagName {
+                    expected_name: expected_name.to_string(),
+                })
+            }
+        } else {
+            Err(XmlError::ETagAfterRootElement)
+        }
     }
 
     fn parse_decl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
@@ -777,6 +788,34 @@ mod tests {
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
+        }
+
+        #[test]
+        fn fail_on_wrong_etag() {
+            let mut reader = Reader::new("<e></d>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::WrongETagName {
+                    expected_name: "e".to_string(),
+                }),
+                reader
+            );
+        }
+
+        #[test]
+        fn fail_on_wrong_etag_in_depth_graph() {
+            let mut reader = Reader::new("<a><e><e></e><e/></d></a>");
+            assert_evt!(Ok(Some(XmlEvent::stag("a", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(
+                Err(XmlError::WrongETagName {
+                    expected_name: "e".to_string(),
+                }),
+                reader
+            );
         }
     }
 

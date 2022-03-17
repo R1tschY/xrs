@@ -167,8 +167,12 @@ pub enum XmlError {
     ExpectedAttrValue,
     ExpectedEquals,
     ExpectedDocumentEnd,
+    WrongETagName {
+        expected_name: String,
+    },
     UnexpectedEof,
     CDataEndInContent,
+    ETagAfterRootElement,
     OpenElementAtEof,
     NonUniqueAttribute {
         attribute: String,
