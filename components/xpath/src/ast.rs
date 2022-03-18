@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::token::{Ident, Literal, Number, Punct, Token, Tokens};
 
 macro_rules! token {
@@ -81,46 +83,46 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn next(&self) -> Option<&Token> {
+    pub fn next(&self) -> Option<&Token> {
         self.rest.get(0)
     }
 
-    fn consume_first(&self) -> Self {
+    pub fn consume_first(&self) -> Self {
         if let Some((_, rest)) = self.rest.split_first() {
             Self { rest }
         } else {
-            self.clone()
+            *self
         }
     }
 
-    fn consume(&self, n: usize) -> Self {
+    pub fn consume(&self, n: usize) -> Self {
         let (_, rest) = self.rest.split_at(n);
         Self { rest }
     }
 
-    fn error(&mut self) {
+    pub fn error(&mut self) {
         panic!("parser error")
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.rest.is_empty()
     }
 
-    fn punct(&'a self) -> Option<&'a Punct> {
+    pub fn punct(&'a self) -> Option<&'a Punct> {
         match self.next() {
             Some(Token::Punct(punct)) => Some(punct),
             _ => None,
         }
     }
 
-    fn ident(&'a self) -> Option<&'a Ident> {
+    pub fn ident(&'a self) -> Option<&'a Ident> {
         match self.next() {
             Some(Token::Ident(ident)) => Some(ident),
             _ => None,
         }
     }
 
-    fn try_consume<T: ParserToken>(&self) -> Option<Self> {
+    pub fn try_consume<T: ParserToken>(&self) -> Option<Self> {
         if T::peek(self) {
             Some(self.consume(T::len()))
         } else {
@@ -128,7 +130,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn expect<T: ParserToken>(&self) -> Self {
+    pub fn expect<T: ParserToken>(&self) -> Self {
         if T::peek(self) {
             self.consume(T::len())
         } else {
@@ -137,6 +139,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub struct ParseBuffer<'a> {
     cur: Cursor<'a>,
 }
@@ -148,10 +151,12 @@ pub trait Parse: Sized {
     fn parse(cur: &mut ParseBuffer) -> Result<Self, ParseError>;
 }
 
+#[allow(dead_code)]
 pub struct Ast {
     expr: Expr,
 }
 
+#[allow(dead_code)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
 enum Precedence {
     Or,
@@ -165,6 +170,7 @@ enum Precedence {
     Path,
 }
 
+#[allow(dead_code)]
 impl Precedence {
     pub fn of(op: Operator) -> Self {
         match op {
@@ -349,7 +355,7 @@ impl<'a> ShuntingYardParser<'a> {
     }
 
     fn push_operator(&mut self, operator: Operator) {
-        while compare_ops(*self.operators.last().unwrap(), operator.clone()) {
+        while compare_ops(*self.operators.last().unwrap(), operator) {
             self.pop_operator();
         }
         self.operators.push(operator);
@@ -368,6 +374,7 @@ fn compare_ops(left: Operator, right: Operator) -> bool {
     }
 }
 
+#[allow(clippy::manual_map)]
 fn try_consume_binary_op<'a>(cursor: &Cursor<'a>) -> Option<(BinOp, Cursor<'a>)> {
     if let Some(cursor) = cursor.try_consume::<token!(+)>() {
         Some((BinOp::Add, cursor))
@@ -378,6 +385,7 @@ fn try_consume_binary_op<'a>(cursor: &Cursor<'a>) -> Option<(BinOp, Cursor<'a>)>
     }
 }
 
+#[allow(clippy::manual_map)]
 fn try_consume_unary_op<'a>(cursor: &Cursor<'a>) -> Option<(UnaryOp, Cursor<'a>)> {
     if let Some(cursor) = cursor.try_consume::<token!(-)>() {
         Some((UnaryOp::Negative, cursor))
@@ -386,7 +394,7 @@ fn try_consume_unary_op<'a>(cursor: &Cursor<'a>) -> Option<(UnaryOp, Cursor<'a>)
     }
 }
 
-trait ParserToken {
+pub trait ParserToken {
     fn peek(cursor: &Cursor) -> bool;
     fn len() -> usize;
     fn display() -> &'static str;

@@ -1,9 +1,9 @@
+use std::str::from_utf8;
+
 use crate::chars::XmlStrExt;
 use crate::dom::Element;
 use crate::error::{Error, Reason};
 use crate::Span;
-use std::io::Read;
-use std::str::from_utf8;
 
 pub trait XmlValidatorBuilder<'a> {
     type Item: XmlValidator<'a>;

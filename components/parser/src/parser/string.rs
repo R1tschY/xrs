@@ -15,7 +15,7 @@ impl<'a> Parser<'a> for Lit {
 
     fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
         if !cur.has_next_str(self.lit) {
-            return Err(());
+            Err(())
         } else {
             Ok(((), cur.advance(self.lit.len())))
         }

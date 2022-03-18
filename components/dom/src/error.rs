@@ -1,7 +1,7 @@
-use crate::Span;
-use std::fmt::Formatter;
 use std::str::Utf8Error;
 use std::{fmt, io};
+
+use crate::Span;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -17,10 +17,7 @@ impl Error {
 
     /// Return whether error is caused by not well formed XML
     pub fn is_not_wf(&self) -> bool {
-        match self.reason {
-            Reason::Io(_) => false,
-            _ => true,
-        }
+        !matches!(self.reason, Reason::Io(_))
     }
 
     fn message(&self) -> String {

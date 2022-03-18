@@ -1,5 +1,6 @@
-use crate::XPathError;
 use xml_dom::{Document, Element};
+
+use crate::XPathError;
 
 pub trait Selector {
     fn select<'a, 'b, 'c, T: Iterator<Item = &'a Element> + 'a>(
@@ -17,7 +18,7 @@ impl Selector for AnyChild {
     fn select<'a, 'b, 'c, T: Iterator<Item = &'a Element> + 'a>(
         &'a self,
         iter: T,
-        doc: &'b Document<'c>,
+        _doc: &'b Document<'c>,
     ) -> Box<dyn Iterator<Item = Result<&'a Element, XPathError>> + 'a>
     where
         'b: 'a,

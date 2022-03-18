@@ -1,13 +1,6 @@
-use std::borrow::Cow;
-use std::io::Cursor;
 use std::str::{from_utf8, Utf8Error};
 
-use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
-use quick_xml::{Error as XmlError, Error};
-
 pub use dom::{Document, Element};
-
-use self::chars::*;
 
 pub mod chars;
 pub mod dom;
@@ -60,5 +53,17 @@ impl QName {
             prefix,
             local_name,
         }
+    }
+
+    pub fn namespace(&self) -> Option<Span> {
+        self.namespace
+    }
+
+    pub fn prefix(&self) -> Span {
+        self.prefix
+    }
+
+    pub fn local_name(&self) -> Span {
+        self.local_name
     }
 }

@@ -1,9 +1,12 @@
-use crate::Span;
-use std::cmp::Ordering::{Equal, Greater, Less};
+#![allow(dead_code)]
+
 use std::fmt;
 use std::fmt::Debug;
 use std::str::{Bytes, Chars, FromStr};
+
 use xml_chars::{XmlAsciiChar, XmlChar};
+
+use crate::Span;
 
 #[derive(Debug)]
 pub struct LexError {
@@ -287,7 +290,7 @@ fn skip_whitespace<'a>(input: &LexCursor<'a>) -> LexCursor<'a> {
     if len > 0 {
         input.advance(len)
     } else {
-        input.clone()
+        *input
     }
 }
 

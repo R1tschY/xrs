@@ -325,7 +325,7 @@ impl<'a> Parser<'a> for SDDeclToken {
         } else if yes_no == "no" {
             Ok((false, cursor))
         } else {
-            return Err(XmlError::IllegalAttributeValue("Expected yes or no"));
+            Err(XmlError::IllegalAttributeValue("Expected yes or no"))
         }
     }
 }
@@ -381,7 +381,7 @@ impl<'a> Parser<'a> for EncNameToken {
 
 fn expect_token<'a>(cursor: Cursor<'a>, token: &'static str) -> Result<((), Cursor<'a>), XmlError> {
     if !cursor.has_next_str(token) {
-        return Err(XmlError::ExpectToken(token));
+        Err(XmlError::ExpectToken(token))
     } else {
         Ok(((), cursor.advance(token.len())))
     }
@@ -422,7 +422,7 @@ pub struct Reader<'a> {
 impl<'a> Reader<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            cursor: Cursor::from_str(input),
+            cursor: Cursor::new(input),
             attributes: Vec::with_capacity(4),
             xml_lang: None,
             stack: vec![],
@@ -443,6 +443,7 @@ impl<'a> Reader<'a> {
         &self.attributes
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         self.attributes.clear();
         if self.empty {
@@ -499,20 +500,18 @@ impl<'a> Reader<'a> {
                         } else {
                             Err(UnexpectedCharacter(self.cursor.next_char().unwrap()))
                         }
+                    } else if let Some((i, _)) = self
+                        .cursor
+                        .rest_bytes()
+                        .iter()
+                        .enumerate()
+                        .find(|(i, &c)| c == b'<')
+                    {
+                        let (chars, cur) = self.cursor.advance2(i);
+                        self.cursor = cur;
+                        Ok(Some(Characters(chars.into())))
                     } else {
-                        if let Some((i, _)) = self
-                            .cursor
-                            .rest_bytes()
-                            .iter()
-                            .enumerate()
-                            .find(|(i, &c)| c == b'<')
-                        {
-                            let (chars, cur) = self.cursor.advance2(i);
-                            self.cursor = cur;
-                            Ok(Some(Characters(chars.into())))
-                        } else {
-                            Err(UnexpectedEof)
-                        }
+                        Err(UnexpectedEof)
                     }
                 }
             };
@@ -573,12 +572,7 @@ impl<'a> Reader<'a> {
             let (raw_value, cursor) = AttValueToken.parse(cursor)?;
             self.cursor = cursor;
 
-            if self
-                .attributes
-                .iter()
-                .find(|attr| attr.name == attr_name)
-                .is_some()
-            {
+            if self.attributes.iter().any(|attr| attr.name == attr_name) {
                 return Err(XmlError::NonUniqueAttribute {
                     attribute: attr_name.to_string(),
                 });

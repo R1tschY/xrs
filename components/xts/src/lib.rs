@@ -1,16 +1,15 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufReader, Write};
-use std::path::{Path, PathBuf};
-
-use serde::Deserialize;
-use std::error::Error;
 use std::fmt::Debug;
-use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::fs::File;
+use std::io::BufReader;
+use std::panic::RefUnwindSafe;
+use std::path::{Path, PathBuf};
 use std::{fs, panic};
+
+use serde::{Deserialize, Serialize};
 use xserde::from_reader;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename = "TESTSUITE")]
 struct TestSuite {
     #[serde(rename = "@PROFILE", default)]
@@ -173,6 +172,12 @@ pub struct XmlTester {
     xmlts_root: PathBuf,
 }
 
+impl Default for XmlTester {
+    fn default() -> Self {
+        XmlTester::new()
+    }
+}
+
 impl XmlTester {
     pub fn new() -> Self {
         Self {
@@ -217,9 +222,9 @@ impl XmlTester {
             for (ty, ty_stat) in &subreport.type_statistic {
                 report
                     .type_statistic
-                    .entry(ty.clone())
+                    .entry(*ty)
                     .and_modify(|s| s.merge_with(ty_stat))
-                    .or_insert(ty_stat.clone());
+                    .or_insert_with(|| ty_stat.clone());
             }
             report.subtests.push(subreport);
         }
@@ -297,7 +302,7 @@ pub struct XmlTestResult {
     pub success: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TestStatistic {
     failed: usize,
     count: usize,
@@ -314,15 +319,6 @@ impl TestStatistic {
     pub fn merge_with(&mut self, other: &TestStatistic) {
         self.failed += other.failed;
         self.count += other.count;
-    }
-}
-
-impl Default for TestStatistic {
-    fn default() -> Self {
-        Self {
-            failed: 0,
-            count: 0,
-        }
     }
 }
 
@@ -436,14 +432,15 @@ impl XmlConfirmReport {
     fn print_internal(&self, writer: &mut String, indention: usize) {
         use std::fmt::Write;
 
-        write!(
+        writeln!(
             writer,
-            "{}- {} ({}/{})\n",
+            "{}- {} ({}/{})",
             " ".repeat(indention),
             self.name,
             self.statistic.count - self.statistic.failed,
             self.statistic.count
-        );
+        )
+        .unwrap();
 
         for report in &self.subtests {
             report.print_internal(writer, indention + 2);
@@ -451,23 +448,22 @@ impl XmlConfirmReport {
 
         for result in &self.results {
             if !result.success {
-                write!(
+                writeln!(
                     writer,
-                    "{}- FAILED: {}\n",
+                    "{}- FAILED: {}",
                     " ".repeat(indention + 2),
                     result.name,
-                );
+                )
+                .unwrap();
             }
         }
     }
 
     fn compute_failures_by_type(&self, failures: &mut HashMap<Type, TestStatistic>) {
-        use std::fmt::Write;
-
         for result in &self.results {
             failures
                 .entry(result.ty)
-                .or_insert(TestStatistic::default())
+                .or_insert_with(TestStatistic::default)
                 .inc_result(result.success);
         }
 
@@ -477,12 +473,10 @@ impl XmlConfirmReport {
     }
 
     fn compute_failures_by_namespace(&self, failures: &mut HashMap<bool, TestStatistic>) {
-        use std::fmt::Write;
-
         for result in &self.results {
             failures
                 .entry(result.namespace)
-                .or_insert(TestStatistic::default())
+                .or_insert_with(TestStatistic::default)
                 .inc_result(result.success);
         }
 

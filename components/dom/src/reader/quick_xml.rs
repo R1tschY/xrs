@@ -2,7 +2,6 @@ use std::io::Cursor;
 use std::str::from_utf8;
 
 use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
-use quick_xml::Error as XmlError;
 
 use crate::chars::XmlBytesExt;
 use crate::dom::{Document, Element};
@@ -243,12 +242,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use quick_xml::Error as XmlError;
 
     use crate::reader::quick_xml::QuickXmlDomReader;
     use crate::reader::DomReader;
     use crate::validate::NonValidator;
-    use std::fs;
 
     #[test]
     fn only_root() {
@@ -299,9 +299,10 @@ mod tests {
     }
 
     mod structure_fails {
-        use super::*;
         use crate::error::Reason;
         use crate::validate::{WellFormedValidator, WellFormedValidatorBuilder};
+
+        use super::*;
 
         #[test]
         fn pre_text() {
@@ -380,9 +381,10 @@ mod tests {
     }
 
     mod not_well_formed {
-        use super::*;
         use crate::error::Reason;
         use crate::validate::WellFormedValidatorBuilder;
+
+        use super::*;
 
         #[test]
         fn invalid_tag() {

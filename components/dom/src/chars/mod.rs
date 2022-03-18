@@ -64,7 +64,7 @@ impl XmlStrExt for &str {
 
     fn find_invalid_xml_char(&self) -> Option<(usize, char)> {
         self.char_indices()
-            .find(|(i, c)| !lookup_char_u32(*c, &char_maps::CHAR))
+            .find(|(_, c)| !lookup_char_u32(*c, &char_maps::CHAR))
     }
 }
 

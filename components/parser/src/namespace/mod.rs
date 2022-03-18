@@ -1,8 +1,9 @@
-use crate::{DocTypeDecl, XmlDecl, XmlError, PI};
 use std::borrow::Cow;
 use std::fmt;
 use std::str::{from_utf8, FromStr, ParseBoolError};
 use std::sync::Arc;
+
+use crate::{DocTypeDecl, XmlDecl, XmlError, PI};
 
 pub mod parser;
 pub mod stack;
@@ -18,7 +19,7 @@ impl<'a> QName<'a> {
         let mut spliter = input.split(|c| c == ':');
         if let Some(first) = spliter.next() {
             if let Some(second) = spliter.next() {
-                if let Some(_) = spliter.next() {
+                if spliter.next().is_some() {
                     Err(XmlError::IllegalName {
                         name: input.to_string(),
                     })

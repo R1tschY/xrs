@@ -5,7 +5,7 @@ pub struct Cursor<'a> {
 }
 
 impl<'a> Cursor<'a> {
-    pub fn from_str(input: &'a str) -> Self {
+    pub fn new(input: &'a str) -> Self {
         Self {
             rest: input,
             offset: 0,

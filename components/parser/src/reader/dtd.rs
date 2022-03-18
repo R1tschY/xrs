@@ -9,7 +9,7 @@ use crate::{Cursor, XmlError};
 // 2.8 Prolog and Document Type Declaration
 // Document Type Declaration
 
-///	doctypedecl ::= '<!DOCTYPE' S Name (S ExternalID)? S? ('\[' intSubset '\]' S?)? '>'
+/// doctypedecl ::= '<!DOCTYPE' S Name (S ExternalID)? S? ('\[' intSubset '\]' S?)? '>'
 pub struct DocTypeDeclToken;
 
 impl<'a> Parser<'a> for DocTypeDeclToken {

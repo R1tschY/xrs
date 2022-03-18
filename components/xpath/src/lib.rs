@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::borrow::Cow;
 
 use xml_dom::error::Error as DomError;
@@ -37,6 +39,7 @@ enum Axis {
     PrecedingSibling,
     Self_,
 }
+
 enum NodeTest {
     Name(String),
     AnyName,

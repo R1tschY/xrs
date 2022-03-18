@@ -1,6 +1,7 @@
+#![allow(dead_code)]
+
 use crate::error::{Error, Reason, Result};
 use crate::Span;
-use std::str::{from_utf8, Utf8Error};
 
 pub struct Document<'a> {
     bytes: &'a [u8],
@@ -45,6 +46,12 @@ impl Element {
             attributes: Span::new(offset + 1 + tag_len, attrs_len),
             namespaces: None,
         }
+    }
+
+    // offset
+
+    pub fn offset(&self) -> usize {
+        self.offset
     }
 
     // tag
