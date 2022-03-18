@@ -446,8 +446,11 @@ impl<'a> Reader<'a> {
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         self.attributes.clear();
         if self.empty {
-            let _ = self.stack.pop();
             self.empty = false;
+            if let Some(name) = self.stack.pop() {
+                return Ok(Some(XmlEvent::etag(name)));
+            }
+            unreachable!()
         }
 
         while let Some(c) = self.cursor.next_byte(0) {
@@ -707,6 +710,7 @@ mod tests {
         fn empty_element() {
             let mut reader = Reader::new("<elem/>");
             assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
             assert_eq!(empty_array::<Attribute>(), reader.attributes());
             assert_evt!(Ok(None), reader);
         }
@@ -721,6 +725,7 @@ mod tests {
             let mut reader = Reader::new("<elem attr=\"value\"/>");
             assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
             assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -729,6 +734,7 @@ mod tests {
             let mut reader = Reader::new("<elem \t \n \r attr  =  \"value\"  />");
             assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
             assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -737,6 +743,7 @@ mod tests {
             let mut reader = Reader::new("<elem attr='value'/>");
             assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
             assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -745,6 +752,7 @@ mod tests {
             let mut reader = Reader::new("<elem attr  =  'value'  />");
             assert_evt!(Ok(Some(XmlEvent::stag("elem", true))), reader);
             assert_eq!(&[Attribute::new("attr", "value")], reader.attributes());
+            assert_evt!(Ok(Some(XmlEvent::etag("elem"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -756,6 +764,7 @@ mod tests {
                 &[Attribute::new("a", "v"), Attribute::new("b", "w")],
                 reader.attributes()
             );
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -810,6 +819,7 @@ mod tests {
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(
                 Err(XmlError::WrongETagName {
                     expected_name: "e".to_string(),
@@ -827,6 +837,7 @@ mod tests {
         fn only_one_top_level_element_empty() {
             let mut reader = Reader::new("<e/><e/>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Err(XmlError::ExpectedDocumentEnd), reader);
         }
 
@@ -834,6 +845,7 @@ mod tests {
         fn accept_whitespace_after_root() {
             let mut reader = Reader::new("<e/> \r\t\n");
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -855,6 +867,7 @@ mod tests {
             let mut reader = Reader::new("<?xml version='1.0' ?><e/>");
             assert_evt!(Ok(Some(XmlEvent::decl("1.0", None, None))), reader);
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -867,6 +880,7 @@ mod tests {
                 reader
             );
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -879,6 +893,7 @@ mod tests {
                 reader
             );
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -892,6 +907,7 @@ mod tests {
                 reader
             );
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
         }
     }
@@ -919,6 +935,7 @@ mod tests {
         fn fail_on_chars_in_epilog() {
             let mut reader = Reader::new("<e/>abc");
             assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Err(XmlError::UnexpectedCharacter('a')), reader);
         }
 

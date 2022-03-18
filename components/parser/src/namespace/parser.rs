@@ -6,7 +6,6 @@ use crate::{ETag, STag, XmlError, XmlEvent};
 pub struct NsReader<'a> {
     reader: Reader<'a>,
     namespaces: NamespaceStack,
-    empty_element: bool,
     attributes: Vec<NsAttribute<'a>>,
 }
 
@@ -15,16 +14,11 @@ impl<'a> NsReader<'a> {
         Self {
             reader: Reader::new(input),
             namespaces: NamespaceStack::default(),
-            empty_element: false,
             attributes: Vec::with_capacity(4),
         }
     }
 
     pub fn next(&mut self) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
-        if self.empty_element {
-            self.namespaces.pop_scope();
-            self.empty_element = false;
-        }
         self.attributes.clear();
 
         match self.reader.next()? {
@@ -55,8 +49,6 @@ impl<'a> NsReader<'a> {
         }
         scope.finish();
 
-        self.empty_element = stag.empty;
-
         Ok(Some(XmlNsEvent::STag(NsSTag {
             qname: QName::from_str(stag.name())?,
             empty: stag.empty,
@@ -66,6 +58,7 @@ impl<'a> NsReader<'a> {
     fn parse_etag(&mut self, etag: ETag<'a>) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
         self.namespaces.pop_scope();
         Ok(Some(XmlNsEvent::ETag(NsETag {
+            // TODO: use qname stack
             qname: QName::from_str(etag.name())?,
         })))
     }
