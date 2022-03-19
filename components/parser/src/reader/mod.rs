@@ -41,6 +41,40 @@ impl<'a> Parser<'a> for TerminatedChars {
     }
 }
 
+fn xml_terminated<T: Fn(char) -> bool>(predicate: T, terminator: u8) -> CharTerminated<T> {
+    CharTerminated {
+        predicate,
+        terminator,
+    }
+}
+
+struct CharTerminated<T> {
+    predicate: T,
+    terminator: u8,
+}
+
+impl<'a, T: Fn(char) -> bool> Parser<'a> for CharTerminated<T> {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Some((pos, _)) = cursor
+            .rest_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, &c)| c == self.terminator)
+        {
+            let res = cursor.advance2(pos);
+            if let Some(c) = res.0.chars().find(|&c| !(self.predicate)(c)) {
+                return Err(XmlError::IllegalChar(c));
+            }
+            Ok(res)
+        } else {
+            Err(XmlError::UnexpectedEof)
+        }
+    }
+}
+
 // XML
 
 // 2.3 Common Syntactic Constructs

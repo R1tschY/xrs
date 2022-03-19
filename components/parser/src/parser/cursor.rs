@@ -47,6 +47,10 @@ impl<'a> Cursor<'a> {
         self.rest.as_bytes()
     }
 
+    pub fn is_at_end(&self) -> bool {
+        self.rest.is_empty()
+    }
+
     pub fn advance(&self, bytes: usize) -> Self {
         let (_ignore, rest) = self.rest.split_at(bytes);
         println!("ADVANCE {}: {:?}", bytes, _ignore);

@@ -80,6 +80,9 @@ pub trait XmlChar: XmlAsciiChar {
 
     /// https://www.w3.org/TR/REC-xml/#NT-Char
     fn is_xml_char(&self) -> bool;
+
+    /// `PubidChar ::= #x20 | #xD | #xA | [a-zA-Z0-9] | [-'()+,./:=?;!*#@$_%]`
+    fn is_xml_pubid_char(&self) -> bool;
 }
 
 impl XmlAsciiChar for u8 {
@@ -120,5 +123,19 @@ impl XmlChar for char {
     #[inline]
     fn is_xml_char(&self) -> bool {
         binary_search_table(*self, XML_CHAR)
+    }
+
+    fn is_xml_pubid_char(&self) -> bool {
+        matches!(
+            self,
+            '\u{a}'
+            | '\u{d}'
+            | '\u{20}'..='\u{21}'
+            | '\u{23}'..='\u{25}'
+            | '\u{27}'..='\u{3B}'
+            | '\u{3D}'
+            | '\u{3F}'..='\u{5A}'
+            | '\u{5F}'..='\u{5F}'
+            | '\u{61}'..='\u{7A}')
     }
 }

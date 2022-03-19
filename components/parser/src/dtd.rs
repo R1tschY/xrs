@@ -3,22 +3,33 @@ use crate::PI;
 /// Document Type Definition
 #[derive(Clone, Debug, PartialEq)]
 pub struct DocTypeDecl<'a> {
-    name: &'a str,
+    root_element_name: &'a str,
     external_id: Option<ExternalId<'a>>,
     int_subset: Option<IntSubset<'a>>,
 }
 
 impl<'a> DocTypeDecl<'a> {
-    pub fn new(name: &'a str) -> Self {
+    pub fn new(
+        root_element_name: &'a str,
+        external_id: Option<ExternalId<'a>>,
+        int_subset: Option<IntSubset<'a>>,
+    ) -> Self {
         Self {
-            name,
-            external_id: None,
-            int_subset: None,
+            root_element_name,
+            external_id,
+            int_subset,
         }
     }
 
-    pub fn name(&self) -> &'a str {
-        self.name
+    pub fn root_element_name(&self) -> &'a str {
+        self.root_element_name
+    }
+
+    pub fn external_id(&self) -> Option<ExternalId<'a>> {
+        self.external_id.clone()
+    }
+    pub fn int_subset(&self) -> &Option<IntSubset<'a>> {
+        &self.int_subset
     }
 }
 

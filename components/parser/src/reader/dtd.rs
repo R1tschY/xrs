@@ -1,10 +1,80 @@
-use crate::dtd::{DocTypeDecl, IntSubset, MarkupDeclEntry};
+use xml_chars::{XmlAsciiChar, XmlChar};
+
+use crate::dtd::{DocTypeDecl, ExternalId, IntSubset, MarkupDeclEntry};
 use crate::parser::core::{kleene, optional, Kleene, Optional};
 use crate::parser::helper::map_error;
 use crate::parser::string::lit;
 use crate::parser::Parser;
-use crate::reader::{xml_lit, NameToken, SToken};
+use crate::reader::{xml_lit, xml_terminated, CharTerminated, NameToken, SToken, TerminatedChars};
 use crate::{Cursor, XmlError};
+
+// 2.3 Common Syntactic Constructs
+// Literals
+
+/// External identifier literal
+/// `SystemLiteral ::= ('"' [^"]* '"') | ("'" [^']* "'")`
+pub struct SystemLiteralToken;
+
+impl<'a> Parser<'a> for SystemLiteralToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (quote_char, cursor) = if let Ok((_, cursor)) = xml_lit("\"").parse(cursor) {
+            (b'\"', cursor)
+        } else if let Ok((_, cursor)) = xml_lit("\'").parse(cursor) {
+            (b'\'', cursor)
+        } else {
+            return Err(XmlError::ExpectToken("SystemLiteral"));
+        };
+
+        if let Some((pos, _)) = cursor
+            .rest_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, &c)| c == quote_char)
+        {
+            let (res, cursor) = cursor.advance2(pos);
+            Ok((res, cursor.advance(1)))
+        } else {
+            Err(XmlError::UnexpectedEof)
+        }
+    }
+}
+
+/// Identifier literal
+/// `PubidLiteral ::= '"' PubidChar* '"' | "'" (PubidChar - "'")* "'"`
+pub struct PubidLiteralToken;
+
+impl<'a> Parser<'a> for PubidLiteralToken {
+    type Attribute = &'a str;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (quote_char, cursor) = if let Ok((_, cursor)) = xml_lit("\"").parse(cursor) {
+            (b'\"', cursor)
+        } else if let Ok((_, cursor)) = xml_lit("\'").parse(cursor) {
+            (b'\'', cursor)
+        } else {
+            return Err(XmlError::ExpectToken("PubidLiteral"));
+        };
+
+        if let Some((pos, _)) = cursor
+            .rest_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, &c)| c == quote_char)
+        {
+            let (res, cursor) = cursor.advance2(pos);
+            if let Some(c) = res.chars().find(|&c| !c.is_xml_pubid_char()) {
+                return Err(XmlError::IllegalChar(c));
+            }
+            Ok((res, cursor.advance(1)))
+        } else {
+            Err(XmlError::UnexpectedEof)
+        }
+    }
+}
 
 // 2.8 Prolog and Document Type Declaration
 // Document Type Declaration
@@ -21,13 +91,17 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
         let (_, cursor) = SToken.parse(cursor)?;
         let (name, cursor) = NameToken.parse(cursor)?;
 
-        // let ((_, external_id), cursor) = optional((SToken, ExternalIdToken)).parse(cursor)?;
-        // let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (external_id, cursor) = optional((SToken, ExternalIdToken)).parse(cursor)?;
+        let external_id = external_id.map(|v| v.1);
+        let (_, cursor) = optional(SToken).parse(cursor)?;
         // let (_, cursor) = optional((xml_lit("["), IntSubsetToken, xml_lit("]"), optional(SToken)))
         //     .parse(cursor)?;
         let (_, cursor) = xml_lit(">").parse(cursor)?;
 
-        Ok((DocTypeDecl::new(name), cursor))
+        Ok((
+            DocTypeDecl::new(name, external_id, Some(IntSubset::new(vec![]))),
+            cursor,
+        ))
     }
 }
 
@@ -139,6 +213,140 @@ impl<'a> Parser<'a> for MarkupDeclToken {
 // 4.2.2 External Entities
 
 /// ExternalID ::= 'SYSTEM' S SystemLiteral | 'PUBLIC' S PubidLiteral S SystemLiteral
-pub struct ExternalID;
+pub struct ExternalIdToken;
+
+impl<'a> Parser<'a> for ExternalIdToken {
+    type Attribute = ExternalId<'a>;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (pub_id, cursor) = if let Ok((_, cursor)) = xml_lit("SYSTEM").parse(cursor) {
+            (None, cursor)
+        } else if let Ok(((_, _, pubid), cursor)) =
+            (xml_lit("PUBLIC"), SToken, PubidLiteralToken).parse(cursor)
+        {
+            (Some(pubid), cursor)
+        } else {
+            return Err(XmlError::ExpectToken("ExternalID"));
+        };
+
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (system, cursor) = SystemLiteralToken.parse(cursor)?;
+
+        if let Some(pub_id) = pub_id {
+            Ok((ExternalId::Public { pub_id, system }, cursor))
+        } else {
+            Ok((ExternalId::System { system }, cursor))
+        }
+    }
+}
 
 // NDataDecl ::= S 'NDATA' S Name
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod name {
+        use crate::parser::Parser;
+        use crate::reader::dtd::DocTypeDeclToken;
+        use crate::{Cursor, XmlError};
+
+        #[test]
+        fn pass() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE elem>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!("elem", dtd.root_element_name())
+        }
+
+        #[test]
+        fn accept_whitespace() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE\t\r\nelem\t\r\n>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!("elem", dtd.root_element_name())
+        }
+
+        #[test]
+        fn fail_invalid_name() {
+            let err = DocTypeDeclToken.parse(Cursor::new("<!DOCTYPE $e>"));
+            assert_eq!(Err(XmlError::IllegalNameStartChar('$')), err)
+        }
+    }
+
+    mod external_id {
+        use crate::dtd::ExternalId;
+        use crate::parser::Parser;
+        use crate::reader::dtd::DocTypeDeclToken;
+        use crate::{Cursor, XmlError};
+
+        #[test]
+        fn pass_system() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE e SYSTEM \"abc\">"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                Some(ExternalId::System { system: "abc" }),
+                dtd.external_id()
+            );
+        }
+
+        #[test]
+        fn pass_system_single_quote() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE e SYSTEM \'abc\'>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                Some(ExternalId::System { system: "abc" }),
+                dtd.external_id()
+            );
+        }
+
+        #[test]
+        fn pass_public() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE e PUBLIC \"pubid\" 'system'>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                Some(ExternalId::Public {
+                    pub_id: "pubid",
+                    system: "system"
+                }),
+                dtd.external_id()
+            );
+        }
+
+        #[test]
+        fn pass_public_single_quote() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE e PUBLIC 'pubid' 'system'>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                Some(ExternalId::Public {
+                    pub_id: "pubid",
+                    system: "system"
+                }),
+                dtd.external_id()
+            );
+        }
+
+        #[test]
+        fn fail_invalid_pubid() {
+            let result = DocTypeDeclToken.parse(Cursor::new("<!DOCTYPE e PUBLIC '{}' 'system'>"));
+            assert!(result.is_err()); // TODO
+        }
+
+        #[test]
+        fn fail_missing_system_id() {
+            let result = DocTypeDeclToken.parse(Cursor::new("<!DOCTYPE e PUBLIC 'public'>"));
+            assert!(result.is_err()); // TODO
+        }
+    }
+}
