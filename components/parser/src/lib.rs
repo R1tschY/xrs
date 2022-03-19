@@ -167,6 +167,7 @@ pub enum XmlError {
     ExpectedAttrValue,
     ExpectedEquals,
     ExpectedDocumentEnd,
+    ExpectedWhitespace,
     WrongETagName {
         expected_name: String,
     },

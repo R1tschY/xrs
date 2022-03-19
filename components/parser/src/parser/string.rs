@@ -40,7 +40,11 @@ impl<'a, P: Fn(char) -> bool> Parser<'a> for Chars<P> {
             .char_indices()
             .find(|(_, c)| !(self.predicate)(*c))
         {
-            Ok(cur.advance2(i))
+            if i > 0 {
+                Ok(cur.advance2(i))
+            } else {
+                Err(())
+            }
         } else {
             Err(())
         }
@@ -66,7 +70,11 @@ impl<'a, P: Fn(u8) -> bool> Parser<'a> for Bytes<P> {
             .enumerate()
             .find(|(_, &c)| !(self.predicate)(c))
         {
-            Ok(cur.advance2(i))
+            if i > 0 {
+                Ok(cur.advance2(i))
+            } else {
+                Err(())
+            }
         } else {
             Err(())
         }

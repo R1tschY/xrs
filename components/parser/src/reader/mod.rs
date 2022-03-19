@@ -92,7 +92,16 @@ impl<'a> Parser<'a> for SToken {
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        Ok(((), skip_whitespace(cursor)))
+        let size = cursor
+            .rest_bytes()
+            .iter()
+            .take_while(|c| c.is_xml_whitespace())
+            .count();
+        if size > 0 {
+            Ok(((), cursor.advance(size)))
+        } else {
+            Err(XmlError::ExpectedWhitespace)
+        }
     }
 }
 
@@ -304,9 +313,10 @@ impl<'a> Parser<'a> for EqToken {
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
         let (_, cursor) = xml_lit("=").parse(cursor)?;
-        SToken.parse(cursor)
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        Ok(((), cursor))
     }
 }
 
@@ -318,7 +328,7 @@ impl<'a> Parser<'a> for VersionNumToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
         map_error(
-            lexeme((lit("1."), plus(chars(|c: char| c.is_ascii_digit())))),
+            lexeme((lit("1."), chars(|c: char| c.is_ascii_digit()))),
             |_| XmlError::ExpectToken("1.[0-9]+"),
         )
         .parse(cursor)
@@ -492,19 +502,6 @@ fn expect_token<'a>(cursor: Cursor<'a>, token: &'static str) -> Result<((), Curs
     }
 }
 
-fn skip_whitespace(cursor: Cursor) -> Cursor {
-    let size = cursor
-        .rest_bytes()
-        .iter()
-        .take_while(|c| c.is_xml_whitespace())
-        .count();
-    if size > 0 {
-        cursor.advance(size)
-    } else {
-        cursor
-    }
-}
-
 fn expect_byte(cursor: Cursor, c: u8, err: fn() -> XmlError) -> Result<Cursor, XmlError> {
     if cursor.next_byte(0) == Some(c) {
         Ok(cursor.advance(1))
@@ -599,6 +596,7 @@ impl<'a> Reader<'a> {
                             self.cursor = self.cursor.advance(2);
                             self.parse_etag()
                         } else if c == b'?' {
+                            dbg!(self.cursor);
                             if self.is_prolog() && self.version.is_none() {
                                 // TODO: not correct
                                 if self.cursor.has_next_str("<?xml") {
@@ -629,6 +627,7 @@ impl<'a> Reader<'a> {
                 }
                 b'&' => self.parse_reference(),
                 _ => {
+                    dbg!(self.cursor);
                     if self.stack.is_empty() {
                         // only white space allowed
                         if c.is_xml_whitespace() {
@@ -661,15 +660,19 @@ impl<'a> Reader<'a> {
             return Err(XmlError::ExpectedDocumentEnd);
         }
 
-        let (name, cursor) = NameToken.parse(self.cursor)?;
+        let (name, mut cursor) = NameToken.parse(self.cursor)?;
+        let mut got_whitespace = if let Ok((_, cur)) = SToken.parse(cursor) {
+            cursor = cur;
+            true
+        } else {
+            false
+        };
 
-        self.cursor = skip_whitespace(cursor);
-
-        while let Some(c) = self.cursor.next_byte(0) {
+        while let Some(c) = cursor.next_byte(0) {
             // /> empty end
             if c == b'/' {
-                return if Some(b'>') == self.cursor.next_byte(1) {
-                    self.cursor = self.cursor.advance(2);
+                return if Some(b'>') == cursor.next_byte(1) {
+                    self.cursor = cursor.advance(2);
                     self.empty = true;
                     self.seen_root = true;
                     self.stack.push(name);
@@ -681,24 +684,28 @@ impl<'a> Reader<'a> {
 
             // normal end
             if c == b'>' {
-                self.cursor = self.cursor.advance(1);
+                self.cursor = cursor.advance(1);
                 self.empty = false;
                 self.seen_root = true;
                 self.stack.push(name);
                 return Ok(Some(XmlEvent::stag(name, false)));
             }
 
-            // whitespace
-            if c.is_xml_whitespace() {
-                self.cursor = self.cursor.advance(1);
-                continue;
+            // attribute
+            if !got_whitespace {
+                return Err(XmlError::ExpectedWhitespace);
             }
 
-            // attribute
-            let (attr_name, cursor) = NameToken.parse(self.cursor)?;
-            let (_, cursor) = EqToken.parse(cursor)?;
-            let (raw_value, cursor) = AttValueToken.parse(cursor)?;
-            self.cursor = cursor;
+            let (attr_name, cur) = NameToken.parse(cursor)?;
+            let (_, cur) = EqToken.parse(cur)?;
+            let (raw_value, cur) = AttValueToken.parse(cur)?;
+            if let Ok((_, cur)) = SToken.parse(cur) {
+                cursor = cur;
+                got_whitespace = true;
+            } else {
+                cursor = cur;
+                got_whitespace = false;
+            }
 
             if self.attributes.iter().any(|attr| attr.name == attr_name) {
                 return Err(XmlError::NonUniqueAttribute {
@@ -722,7 +729,7 @@ impl<'a> Reader<'a> {
 
         // TODO: xml_lit(self.stack.pop()) should be faster
         let (name, cursor) = NameToken.parse(self.cursor)?;
-        let cursor = skip_whitespace(cursor);
+        let (_, cursor) = optional(SToken).parse(cursor)?;
         let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
         self.cursor = cursor;
 
