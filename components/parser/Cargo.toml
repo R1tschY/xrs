@@ -12,3 +12,8 @@ xml-chars = { path = "../chars" }
 
 [dev-dependencies]
 xml-xts = { path = "../xts" }
+serde_json = "1"
+
+[build-dependencies]
+xml-xts = { path = "../xts" }
+serde_json = "1"

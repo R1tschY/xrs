@@ -11,79 +11,79 @@ use xserde::from_reader;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename = "TESTSUITE")]
-struct TestSuite {
+pub struct TestSuite {
     #[serde(rename = "@PROFILE", default)]
-    profile: String,
+    pub profile: String,
 
     #[serde(rename = "TESTCASES")]
-    test_cases: Vec<TestCases>,
+    pub test_cases: Vec<TestCases>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename = "TESTCASES")]
-struct TestCases {
+pub struct TestCases {
     #[serde(rename = "TEST", default)]
-    tests: Vec<Test>,
+    pub tests: Vec<Test>,
 
     #[serde(rename = "TESTCASES", default)]
-    test_cases: Vec<TestCases>,
+    pub test_cases: Vec<TestCases>,
 
     #[serde(rename = "@xml:base", default)]
-    base: String,
+    pub base: String,
 
     #[serde(rename = "@PROFILE", default)]
-    profile: String,
+    pub profile: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename = "TEST")]
-struct Test {
+pub struct Test {
     #[serde(rename = "@ENTITIES", default)]
-    entities: Entities,
+    pub entities: Entities,
 
     #[serde(rename = "@ID")]
-    id: String,
+    pub id: String,
 
     #[serde(rename = "@OUTPUT", default)]
-    output: Option<String>,
+    pub output: Option<String>,
 
     #[serde(rename = "@OUTPUT3", default)]
-    output3: Option<String>,
+    pub output3: Option<String>,
 
     #[serde(rename = "@SECTIONS")]
-    sections: String,
+    pub sections: String,
 
     #[serde(rename = "@RECOMMENDATION", default)]
-    recommendation: Recommendation,
+    pub recommendation: Recommendation,
 
     #[serde(rename = "@TYPE")]
-    ty: Type,
+    pub ty: Type,
 
     #[serde(rename = "@VERSION", default)]
-    version: Option<String>,
+    pub version: Option<String>,
 
     #[serde(rename = "@EDITION", default)]
-    edition: String,
+    pub edition: String,
 
     #[serde(rename = "@URI")]
-    uri: String,
+    pub uri: String,
 
     #[serde(rename = "@NAMESPACE", default = "yes")]
-    namespace: YesNo,
+    pub namespace: YesNo,
 
     #[serde(rename = "$value")]
-    description: Vec<String>,
+    pub description: Vec<String>,
 }
 
-#[derive(Deserialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
-enum YesNo {
+#[derive(Deserialize, Serialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
+pub enum YesNo {
     #[serde(rename = "yes")]
     Yes,
     #[serde(rename = "no")]
     No,
 }
 
-fn yes() -> YesNo {
+pub fn yes() -> YesNo {
     YesNo::Yes
 }
 
@@ -106,7 +106,7 @@ impl From<YesNo> for bool {
     }
 }
 
-#[derive(Deserialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
+#[derive(Deserialize, Serialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum Type {
     #[serde(rename = "valid")]
     Valid,
@@ -118,8 +118,8 @@ pub enum Type {
     Error,
 }
 
-#[derive(Deserialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
-enum Entities {
+#[derive(Deserialize, Serialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
+pub enum Entities {
     #[serde(rename = "both")]
     Both,
     #[serde(rename = "none")]
@@ -136,9 +136,9 @@ impl Default for Entities {
     }
 }
 
-#[derive(Deserialize, Debug, Hash, Eq, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Hash, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
-enum Recommendation {
+pub enum Recommendation {
     #[serde(rename = "XML1.0")]
     Xml_1_0,
     #[serde(rename = "XML1.1")]
@@ -185,9 +185,13 @@ impl XmlTester {
         }
     }
 
-    pub fn test(&self, parser: &(dyn TestableParser + RefUnwindSafe)) -> XmlConfirmReport {
+    pub fn parse_test_suite(&self) -> TestSuite {
         let file = File::open(self.xmlts_root.join("xmlconf.complete.xml")).unwrap();
-        let test_suite: TestSuite = from_reader(BufReader::new(file)).unwrap();
+        from_reader(BufReader::new(file)).unwrap()
+    }
+
+    pub fn test(&self, parser: &(dyn TestableParser + RefUnwindSafe)) -> XmlConfirmReport {
+        let test_suite: TestSuite = self.parse_test_suite();
         let mut report = XmlConfirmReport::new(&test_suite.profile);
 
         println!("PROFILE: {}", &test_suite.profile);
@@ -239,43 +243,7 @@ impl XmlTester {
     ) {
         println!("## {}", test.uri);
 
-        let result = panic::catch_unwind(|| {
-            let path = base.join(&test.uri);
-            let content = fs::read(path).unwrap();
-            let mut success = match test.ty {
-                Type::Valid => parser.is_wf(&content, test.namespace.into()),
-                Type::Invalid => parser.is_wf(&content, test.namespace.into()),
-                Type::Error => return false,
-                Type::NotWf => !parser.is_wf(&content, test.namespace.into()),
-            };
-            if let Some(output) = &test.output {
-                match parser.canonxml(&content, test.namespace.into()) {
-                    Ok(out) => {
-                        let out_path = base.join(&output);
-                        let out_content = fs::read(out_path).unwrap();
-                        if out.as_bytes() != out_content {
-                            println!(
-                                "{:?} != {:?}",
-                                out,
-                                std::str::from_utf8(&out_content).unwrap()
-                            );
-                            success = false;
-                        }
-                    }
-                    Err(_err) => {
-                        success = false;
-                    }
-                }
-            }
-            success
-        });
-        let success = match result {
-            Ok(success) => success,
-            Err(err) => {
-                println!("{}: PANIC: {:?}", test.uri, err);
-                false
-            }
-        };
+        let success = panic::catch_unwind(|| Self::execute_test(parser, test, base)).is_ok();
 
         report.results.push(XmlTestResult {
             name: test.uri.to_string(),
@@ -291,6 +259,43 @@ impl XmlTester {
             .entry(test.ty)
             .and_modify(|s| s.inc_result(success))
             .or_default();
+    }
+
+    pub fn execute_test(parser: &dyn TestableParser, test: &Test, base: &Path) {
+        let path = base.join(&test.uri);
+        let content = fs::read(path).unwrap();
+        match test.ty {
+            Type::Valid => assert!(
+                parser.is_wf(&content, test.namespace.into()),
+                "should be well-formed"
+            ),
+            Type::Invalid => assert!(
+                parser.is_wf(&content, test.namespace.into()),
+                "should be well-formed"
+            ),
+            Type::Error => return,
+            Type::NotWf => assert!(
+                !parser.is_wf(&content, test.namespace.into()),
+                "should not be well-formed"
+            ),
+        };
+
+        if let Some(output) = &test.output {
+            match parser.canonxml(&content, test.namespace.into()) {
+                Ok(out) => {
+                    let out_path = base.join(&output);
+                    let out_content = fs::read(out_path).unwrap();
+                    assert_eq!(out, std::str::from_utf8(&out_content).unwrap());
+                }
+                Err(err) => {
+                    panic!("{:?}", err)
+                }
+            }
+        }
+    }
+
+    pub fn xmlts_root(&self) -> &Path {
+        &self.xmlts_root
     }
 }
 
