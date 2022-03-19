@@ -26,6 +26,11 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
+    pub fn has_next_byte(&self, pat: u8) -> bool {
+        self.rest.as_bytes().get(0) == Some(&pat)
+    }
+
+    #[inline]
     pub fn has_next_str(&self, pat: impl AsRef<str>) -> bool {
         self.rest.starts_with(pat.as_ref())
     }

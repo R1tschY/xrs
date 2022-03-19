@@ -22,24 +22,53 @@ impl<'a> Parser<'a> for Lit {
     }
 }
 
-pub fn char_<P: Fn(char) -> bool>(predicate: P) -> Char<P> {
-    Char { predicate }
+pub fn chars<P: Fn(char) -> bool>(predicate: P) -> Chars<P> {
+    Chars { predicate }
 }
 
-pub struct Char<P: Fn(char) -> bool> {
+pub struct Chars<P: Fn(char) -> bool> {
     predicate: P,
 }
 
-impl<'a, P: Fn(char) -> bool> Parser<'a> for Char<P> {
-    type Attribute = ();
+impl<'a, P: Fn(char) -> bool> Parser<'a> for Chars<P> {
+    type Attribute = &'a str;
     type Error = ();
 
     fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        if let Some(c) = cur.next_char() {
-            if (self.predicate)(c) {
-                return Ok(((), cur.advance(1)));
-            }
+        if let Some((i, c)) = cur
+            .rest()
+            .char_indices()
+            .find(|(_, c)| !(self.predicate)(*c))
+        {
+            Ok(cur.advance2(i))
+        } else {
+            Err(())
         }
-        Err(())
+    }
+}
+
+pub fn bytes<P: Fn(u8) -> bool>(predicate: P) -> Bytes<P> {
+    Bytes { predicate }
+}
+
+pub struct Bytes<P: Fn(u8) -> bool> {
+    predicate: P,
+}
+
+impl<'a, P: Fn(u8) -> bool> Parser<'a> for Bytes<P> {
+    type Attribute = &'a str;
+    type Error = ();
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Some((i, c)) = cur
+            .rest_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, &c)| !(self.predicate)(c))
+        {
+            Ok(cur.advance2(i))
+        } else {
+            Err(())
+        }
     }
 }

@@ -1,14 +1,17 @@
 #![allow(unused)]
 
-use parser::cursor::Cursor;
 use std::borrow::Cow;
 use std::fmt::Formatter;
 use std::fs::read_to_string;
 use std::str::from_utf8;
 use std::{fmt, io};
+
+use parser::cursor::Cursor;
+pub use reader::Reader;
 use xml_chars::XmlAsciiChar;
 use xml_chars::XmlChar;
 
+use crate::dtd::DocTypeDecl;
 use crate::XmlError::{ExpectedElementEnd, IllegalNameStartChar};
 
 mod dtd;
@@ -16,9 +19,6 @@ mod namespace;
 pub mod parser;
 mod reader;
 mod shufti;
-
-use crate::dtd::DocTypeDecl;
-pub use reader::Reader;
 
 /// XML Declaration
 #[derive(Clone, Debug, PartialEq)]
@@ -180,6 +180,8 @@ pub enum XmlError {
     IllegalName {
         name: String,
     },
+    InvalidCharacterReference(String),
+    IllegalReference,
     ExpectToken(&'static str),
     IllegalAttributeValue(&'static str),
     UnsupportedEncoding(String),
