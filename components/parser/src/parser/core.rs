@@ -1,15 +1,16 @@
-use crate::parser::Parser;
-use crate::Cursor;
 use std::marker::PhantomData;
 
+use crate::parser::Parser;
+use crate::Cursor;
+
 #[inline]
-pub fn lexeme<'a, T: 'a + Parser<'a>>(parser: T) -> Lexeme<'a, T> {
-    Lexeme(parser, PhantomData)
+pub fn raw<'a, T: 'a + Parser<'a>>(parser: T) -> Raw<'a, T> {
+    Raw(parser, PhantomData)
 }
 
-pub struct Lexeme<'a, T: Parser<'a>>(T, PhantomData<&'a T>);
+pub struct Raw<'a, T: Parser<'a>>(T, PhantomData<&'a T>);
 
-impl<'a, T: Parser<'a>> Parser<'a> for Lexeme<'a, T> {
+impl<'a, T: Parser<'a>> Parser<'a> for Raw<'a, T> {
     type Attribute = &'a str;
     type Error = T::Error;
 

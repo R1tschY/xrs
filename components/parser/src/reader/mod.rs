@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use xml_chars::{XmlAsciiChar, XmlChar};
 
-use crate::parser::core::{kleene, lexeme, optional, plus, Plus};
+use crate::parser::core::{kleene, optional, plus, raw, Plus};
 use crate::parser::helper::map_error;
 use crate::parser::string::{bytes, chars, lit};
 use crate::parser::Parser;
@@ -328,7 +328,7 @@ impl<'a> Parser<'a> for VersionNumToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
         map_error(
-            lexeme((lit("1."), chars(|c: char| c.is_ascii_digit()))),
+            raw((lit("1."), chars(|c: char| c.is_ascii_digit()))),
             |_| XmlError::ExpectToken("1.[0-9]+"),
         )
         .parse(cursor)
@@ -350,7 +350,7 @@ impl<'a> Parser<'a> for SDDeclToken {
 
         let (yes_no, cursor) = if cursor.next_byte(0) == Some(b'\'') {
             let cursor = cursor.advance(1);
-            let (yes_no, cursor) = map_error(lexeme(plus(chars(|c: char| c != '\''))), |_| {
+            let (yes_no, cursor) = map_error(raw(plus(chars(|c: char| c != '\''))), |_| {
                 XmlError::ExpectToken("'yes' | 'no'")
             })
             .parse(cursor)?;
@@ -358,7 +358,7 @@ impl<'a> Parser<'a> for SDDeclToken {
             (yes_no, cursor)
         } else if cursor.next_byte(0) == Some(b'\"') {
             let cursor = cursor.advance(1);
-            let (yes_no, cursor) = map_error(lexeme(plus(chars(|c: char| c != '\"'))), |_| {
+            let (yes_no, cursor) = map_error(raw(plus(chars(|c: char| c != '\"'))), |_| {
                 XmlError::ExpectToken("'yes' | 'no'")
             })
             .parse(cursor)?;
@@ -482,7 +482,7 @@ impl<'a> Parser<'a> for EncNameToken {
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
         map_error(
-            lexeme((
+            raw((
                 chars(|c: char| c.is_ascii_alphabetic()),
                 kleene(chars(|c: char| {
                     c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'
