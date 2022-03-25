@@ -1,8 +1,11 @@
 //! XML Pull Reader
 
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::marker::PhantomData;
+use std::rc::Rc;
 use std::str::FromStr;
 
 use xml_chars::{XmlAsciiChar, XmlChar};
@@ -510,8 +513,24 @@ fn expect_byte(cursor: Cursor, c: u8, err: fn() -> XmlError) -> Result<Cursor, X
     }
 }
 
+pub struct Entity {
+    name: String,
+    external: bool,
+    text: String,
+}
+
+impl Entity {
+    pub fn new(name: impl ToString, text: impl ToString) -> Self {
+        Self {
+            name: name.to_string(),
+            external: false,
+            text: text.to_string(),
+        }
+    }
+}
+
 pub struct Entities {
-    defined: HashMap<String, Box<str>>,
+    defined: HashMap<String, Rc<Entity>>,
 }
 
 impl Default for Entities {
@@ -531,54 +550,30 @@ impl Default for Entities {
 impl Entities {
     pub fn register(&mut self, name: impl ToString, value: impl ToString) {
         self.defined
-            .insert(name.to_string(), value.to_string().into_boxed_str());
+            .insert(name.to_string(), Rc::new(Entity::new(name, value)));
     }
 
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.defined.get(name).map(|x| x.as_ref())
+    pub fn get_ref(&self, name: &str) -> Option<&Entity> {
+        self.defined.get(name).map(|rc| rc.as_ref())
+    }
+
+    pub fn get_rc(&self, name: &str) -> Option<Rc<Entity>> {
+        self.defined.get(name).cloned()
     }
 }
 
-/// XMl Pull Parser
-pub struct Reader<'a> {
+struct Subparser<'a> {
     cursor: Cursor<'a>,
     attributes: Vec<Attribute<'a>>,
-    xml_lang: Option<&'a str>,
-    stack: Vec<&'a str>,
     empty: bool,
     seen_root: bool,
+    stack: Vec<&'a str>,
     version: Option<&'a str>,
-    standalone: Option<bool>,
-    entities: Entities,
 }
 
-impl<'a> Reader<'a> {
-    pub fn new(input: &'a str) -> Self {
-        Self {
-            cursor: Cursor::new(input),
-            attributes: Vec::with_capacity(4),
-            xml_lang: None,
-            stack: vec![],
-            empty: false,
-            seen_root: false,
-            version: None,
-            standalone: None,
-            entities: Entities::default(),
-        }
-    }
-
-    #[inline]
-    pub fn is_prolog(&self) -> bool {
-        !self.seen_root
-    }
-
-    #[inline]
-    pub fn attributes(&self) -> &[Attribute<'a>] {
-        &self.attributes
-    }
-
+impl<'a> Subparser<'a> {
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+    pub fn next(&mut self, ctx: &mut ParserContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
         self.attributes.clear();
         if self.empty {
             self.empty = false;
@@ -596,11 +591,10 @@ impl<'a> Reader<'a> {
                             self.cursor = self.cursor.advance(2);
                             self.parse_etag()
                         } else if c == b'?' {
-                            dbg!(self.cursor);
                             if self.is_prolog() && self.version.is_none() {
                                 // TODO: not correct
                                 if self.cursor.has_next_str("<?xml") {
-                                    self.parse_decl()
+                                    self.parse_decl(ctx)
                                 } else {
                                     self.parse_pi()
                                 }
@@ -625,9 +619,8 @@ impl<'a> Reader<'a> {
                         Err(XmlError::ExpectedElementStart)
                     }
                 }
-                b'&' => self.parse_reference(),
+                b'&' => self.parse_reference(ctx),
                 _ => {
-                    dbg!(self.cursor);
                     if self.stack.is_empty() {
                         // only white space allowed
                         if c.is_xml_whitespace() {
@@ -649,6 +642,11 @@ impl<'a> Reader<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    #[inline]
+    pub fn is_prolog(&self) -> bool {
+        !self.seen_root
     }
 
     fn is_after_root(&self) -> bool {
@@ -746,11 +744,11 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn parse_decl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+    fn parse_decl(&mut self, doc: &mut ParserContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let (decl, cursor) = XmlDeclToken.parse(self.cursor)?;
 
         self.version = Some(decl.version);
-        self.standalone = decl.standalone;
+        doc.standalone = decl.standalone;
 
         if let Some(encoding) = decl.encoding {
             if encoding != "UTF-8" {
@@ -803,7 +801,10 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn parse_reference(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+    fn parse_reference(
+        &mut self,
+        ctx: &mut ParserContext,
+    ) -> Result<Option<XmlEvent<'a>>, XmlError> {
         if let Some(c) = self.cursor.next_byte(1) {
             if c == b'#' {
                 let (character, cursor) = CharRefToken.parse(self.cursor)?;
@@ -811,11 +812,105 @@ impl<'a> Reader<'a> {
                 Ok(Some(XmlEvent::Characters(character.into())))
             } else {
                 let (entity_ref, cursor) = EntityRefToken.parse(self.cursor)?;
-                self.cursor = cursor;
-                todo!()
+                if let Some(entity) = ctx.entities.get_rc(entity_ref) {
+                    self.cursor = cursor;
+                    todo!()
+                } else {
+                    Err(XmlError::UnknownEntity(entity_ref.to_string()))
+                }
             }
         } else {
             Err(XmlError::IllegalReference)
+        }
+    }
+}
+
+pub struct ParserContext {
+    standalone: Option<bool>,
+    entities: Entities,
+    xml_lang: Option<String>,
+
+    next_entity: Option<Entity>,
+}
+
+/// XMl Pull Parser
+pub struct Reader<'a> {
+    root_parser: Subparser<'a>,
+    sub_parsers: Vec<Subparser<'static>>,
+    ctx: ParserContext,
+}
+
+impl<'a> Reader<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self {
+            root_parser: Subparser {
+                cursor: Cursor::new(input),
+                attributes: Vec::with_capacity(4),
+                empty: false,
+                seen_root: false,
+                version: None,
+                stack: vec![],
+            },
+            sub_parsers: vec![],
+            ctx: ParserContext {
+                standalone: None,
+                entities: Default::default(),
+                xml_lang: None,
+
+                next_entity: None,
+            },
+        }
+    }
+
+    fn get_current_parser(&self) -> &Subparser<'a> {
+        if let Some(parser) = self.sub_parsers.last() {
+            &parser
+        } else {
+            &self.root_parser
+        }
+    }
+
+    #[inline]
+    pub fn attributes(&self) -> &[Attribute<'a>] {
+        &self.get_current_parser().attributes
+    }
+
+    #[inline]
+    pub fn cursor_offset(&self) -> usize {
+        self.get_current_parser().cursor.offset()
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let evt = if let Some(parser) = self.sub_parsers.last_mut() {
+            let result = parser.next(&mut self.ctx);
+            return if result == Ok(None) {
+                self.sub_parsers.pop();
+                self.next()
+            } else {
+                result
+            };
+        } else {
+            self.root_parser.next(&mut self.ctx)
+        };
+
+        match evt {
+            Ok(None) => {
+                if let Some(entity) = &self.ctx.next_entity {
+                    todo!()
+                    // self.sub_parsers.push(Subparser {
+                    //     cursor: Cursor::new(entity.text),
+                    //     attributes: vec![],
+                    //     empty: false,
+                    //     seen_root: false,
+                    //     version: None,
+                    //     stack: vec![],
+                    // });
+                } else {
+                    Ok(None)
+                }
+            }
+            evt => evt,
         }
     }
 }
@@ -828,7 +923,7 @@ mod tests {
 
     macro_rules! assert_evt {
         ($exp:expr, $reader:expr) => {
-            assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor.offset())
+            assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor_offset())
         };
     }
 
@@ -837,7 +932,7 @@ mod tests {
             assert!(
                 matches!($reader.next(), $exp),
                 "error at {}",
-                $reader.cursor.offset()
+                $reader.cursor_offset()
             )
         };
     }
@@ -1350,6 +1445,20 @@ mod tests {
                 Err(XmlError::InvalidCharacterReference("".to_string())),
                 reader
             );
+        }
+    }
+
+    mod entity_replacement {
+        use crate::reader::Reader;
+        use crate::{XmlDecl, XmlError, XmlEvent};
+
+        #[test]
+        fn replace_lt() {
+            let mut reader = Reader::new("<e>&lt;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("<"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
         }
     }
 }

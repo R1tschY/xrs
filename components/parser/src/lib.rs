@@ -183,6 +183,7 @@ pub enum XmlError {
     },
     InvalidCharacterReference(String),
     IllegalReference,
+    UnknownEntity(String),
     ExpectToken(&'static str),
     IllegalAttributeValue(&'static str),
     UnsupportedEncoding(String),
