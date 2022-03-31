@@ -671,7 +671,7 @@ trait InternalXmlParser<'a> {
         doc.standalone = decl.standalone;
 
         if let Some(encoding) = &decl.encoding {
-            if encoding != "UTF-8" {
+            if !encoding.eq_ignore_ascii_case("UTF-8") {
                 return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
             }
         }
@@ -1794,6 +1794,39 @@ mod tests {
             let mut reader = Reader::new("<e>&lt&gt;</e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(Err(XmlError::ExpectToken(";")), reader);
+        }
+    }
+
+    /// 4.3.3 Character Encoding in Entities
+    mod encoding {
+        use crate::reader::Reader;
+        use crate::{XmlDecl, XmlError, XmlEvent};
+
+        #[test]
+        fn utf8_lower() {
+            let mut reader = Reader::new("<?xml version='1.0' encoding='utf-8'?><e/>");
+            assert_evt!(
+                Ok(Some(XmlEvent::decl("1.0", Option::Some("utf-8"), None))),
+                reader
+            );
+        }
+
+        #[test]
+        fn utf8_upper() {
+            let mut reader = Reader::new("<?xml version='1.0' encoding='UTF-8'?><e/>");
+            assert_evt!(
+                Ok(Some(XmlEvent::decl("1.0", Option::Some("UTF-8"), None))),
+                reader
+            );
+        }
+
+        #[test]
+        fn unsupported() {
+            let mut reader = Reader::new("<?xml version='1.0' encoding='UTF128'?><e/>");
+            assert_evt!(
+                Err(XmlError::UnsupportedEncoding("UTF128".to_string())),
+                reader
+            );
         }
     }
 
