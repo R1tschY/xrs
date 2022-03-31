@@ -1,5 +1,3 @@
-use std::cmp::Ordering::{Equal, Greater, Less};
-
 use crate::Category::{Char, Name, NameStart, PubId, Punct, Whitespace};
 
 fn search_table(c: char, table: &[(char, char)]) -> bool {

@@ -19,9 +19,7 @@ use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::XmlEvent::Characters;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent, PI};
 
-pub mod buffer;
 pub mod dtd;
-pub mod entities;
 
 // Common
 
