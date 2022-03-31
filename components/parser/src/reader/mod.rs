@@ -537,7 +537,7 @@ pub struct Entities {
 impl Default for Entities {
     fn default() -> Self {
         let mut result = Entities {
-            defined: HashMap::default(),
+            defined: HashMap::with_capacity(5),
         };
         result.register("lt", "&#60;");
         result.register("gt", "&#62;");
