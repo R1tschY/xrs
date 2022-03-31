@@ -8,10 +8,13 @@ use crate::{DocTypeDecl, XmlDecl, XmlError, PI};
 pub mod parser;
 pub mod stack;
 
+/// Qualified Name
+///
+/// Name with namespace prefix and local part
 #[derive(Clone, Debug, PartialEq)]
 pub struct QName<'a> {
-    prefix: Option<Cow<'a, str>>,
-    local_part: Cow<'a, str>,
+    pub prefix: Option<Cow<'a, str>>,
+    pub local_part: Cow<'a, str>,
 }
 
 impl<'a> QName<'a> {
@@ -84,26 +87,26 @@ impl<'a> QName<'a> {
 pub type Namespace = Arc<NamespaceDecl>;
 
 pub struct NamespaceDecl {
-    prefix: String,
+    prefix: Option<String>,
     uri: String,
 }
 
 impl NamespaceDecl {
-    fn new(prefix: String, uri: String) -> Self {
+    fn new(prefix: Option<String>, uri: String) -> Self {
         Self { prefix, uri }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NsSTag<'a> {
-    qname: QName<'a>,
-    empty: bool,
+    pub qname: QName<'a>,
+    pub empty: bool,
 }
 
 #[derive(Clone, PartialEq)]
 pub struct NsAttribute<'a> {
-    qname: QName<'a>,
-    value: Cow<'a, str>,
+    pub qname: QName<'a>,
+    pub value: Cow<'a, str>,
 }
 
 impl<'a> NsAttribute<'a> {
@@ -134,7 +137,7 @@ impl<'a> fmt::Debug for NsAttribute<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct STagEnd<'a> {
-    qname: QName<'a>,
+    pub qname: QName<'a>,
 }
 
 impl<'a> STagEnd<'a> {

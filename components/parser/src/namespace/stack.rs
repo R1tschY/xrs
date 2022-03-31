@@ -25,6 +25,22 @@ impl NamespaceStack {
         self.namespaces
             .truncate(self.namespaces.len() - scope_namespaces);
     }
+
+    pub fn resolve(&self, prefix: &str) -> Option<&str> {
+        self.namespaces
+            .iter()
+            .rev()
+            .find(|ns| matches!(ns.prefix.as_ref(), Some(prefix)))
+            .map(|ns| &ns.uri as &str)
+    }
+
+    pub fn resolve_default(&self) -> Option<&str> {
+        self.namespaces
+            .iter()
+            .rev()
+            .find(|ns| ns.prefix.is_none())
+            .map(|ns| &ns.uri as &str)
+    }
 }
 
 pub struct NamespaceStackScopeBuilder<'a> {
@@ -38,8 +54,8 @@ impl<'a> NamespaceStackScopeBuilder<'a> {
         self.size += 1;
     }
 
-    pub fn add_prefix(&mut self, prefix: impl Into<String>, uri: impl Into<String>) {
-        self.add(NamespaceDecl::new(prefix.into(), uri.into()));
+    pub fn add_prefix(&mut self, prefix: Option<String>, uri: String) {
+        self.add(NamespaceDecl::new(prefix, uri));
     }
 
     pub fn finish(self) -> &'a mut NamespaceStack {

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::namespace::stack::NamespaceStack;
 use crate::namespace::{NsAttribute, NsETag, NsSTag, QName, XmlNsEvent};
 use crate::reader::Reader;
@@ -18,7 +20,7 @@ impl<'a> NsReader<'a> {
         }
     }
 
-    pub fn next(&'a mut self) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
+    pub fn next(&mut self) -> Result<Option<XmlNsEvent<'a>>, XmlError> {
         self.attributes.clear();
 
         let evt = self.reader.next()?;
@@ -31,8 +33,13 @@ impl<'a> NsReader<'a> {
                     let qname = QName::from_cow(attr.name)?;
                     if let Some(prefix) = &qname.prefix {
                         if *prefix == "xmlns" {
-                            scope.add_prefix(qname.local_part.to_string(), attr.value.to_string())
+                            scope.add_prefix(
+                                Some(qname.local_part.to_string()),
+                                attr.value.to_string(),
+                            )
                         }
+                    } else if qname.local_part == "xmlns" {
+                        scope.add_prefix(None, attr.value.to_string())
                     }
 
                     self.attributes.push(NsAttribute::new(qname, attr.value));
@@ -56,6 +63,42 @@ impl<'a> NsReader<'a> {
             Some(XmlEvent::Dtd(dtd)) => Ok(Some(XmlNsEvent::Dtd(dtd))),
             Some(XmlEvent::PI(pi)) => Ok(Some(XmlNsEvent::PI(pi))),
             Some(XmlEvent::Comment(comment)) => Ok(Some(XmlNsEvent::Comment(comment))),
+        }
+    }
+
+    pub fn attributes(&self) -> &[NsAttribute<'a>] {
+        &self.attributes
+    }
+
+    pub fn resolve_namespace(&self, prefix: Option<&str>) -> Option<&str> {
+        if let Some(prefix) = prefix {
+            self.namespaces.resolve(prefix)
+        } else {
+            self.namespaces.resolve_default()
+        }
+    }
+
+    pub fn resolve_element_namespace(&self, qname: &QName) -> Result<Option<&str>, ()> {
+        let prefix = qname.prefix.as_ref().map(|prefix| &prefix as &str);
+        if let Some(prefix) = prefix {
+            match self.namespaces.resolve(prefix) {
+                Some(ns) => Ok(Some(ns)),
+                None => Err(()),
+            }
+        } else {
+            Ok(self.namespaces.resolve_default())
+        }
+    }
+
+    pub fn resolve_attribute_namespace(&self, qname: &QName) -> Result<Option<&str>, ()> {
+        let prefix = qname.prefix.as_ref().map(|prefix| &prefix as &str);
+        if let Some(prefix) = prefix {
+            match self.namespaces.resolve(prefix) {
+                Some(ns) => Ok(Some(ns)),
+                None => Err(()),
+            }
+        } else {
+            Ok(None)
         }
     }
 }

@@ -6,6 +6,8 @@ use std::fs::read_to_string;
 use std::str::from_utf8;
 use std::{fmt, io};
 
+pub use namespace::parser::*;
+pub use namespace::*;
 use parser::cursor::Cursor;
 pub use reader::Reader;
 use xml_chars::XmlAsciiChar;
