@@ -83,7 +83,7 @@ impl<'a> Parser<'a> for PubidLiteralToken {
 pub struct DocTypeDeclToken;
 
 impl<'a> Parser<'a> for DocTypeDeclToken {
-    type Attribute = DocTypeDecl<'a>;
+    type Attribute = DocTypeDecl;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -99,7 +99,7 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
         let (_, cursor) = xml_lit(">").parse(cursor)?;
 
         Ok((
-            DocTypeDecl::new(name, external_id, Some(IntSubset::new(vec![]))),
+            DocTypeDecl::new(name.to_string(), external_id, Some(IntSubset::new(vec![]))),
             cursor,
         ))
     }
@@ -130,7 +130,7 @@ impl<'a> Parser<'a> for DeclSepToken {
 pub struct IntSubsetToken;
 
 impl<'a> Parser<'a> for IntSubsetToken {
-    type Attribute = IntSubset<'a>;
+    type Attribute = IntSubset;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -147,7 +147,7 @@ impl<'a> Parser<'a> for IntSubsetToken {
 pub struct MarkupDeclToken;
 
 impl<'a> Parser<'a> for MarkupDeclToken {
-    type Attribute = MarkupDeclEntry<'a>;
+    type Attribute = MarkupDeclEntry;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -216,7 +216,7 @@ impl<'a> Parser<'a> for MarkupDeclToken {
 pub struct ExternalIdToken;
 
 impl<'a> Parser<'a> for ExternalIdToken {
-    type Attribute = ExternalId<'a>;
+    type Attribute = ExternalId;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -234,9 +234,20 @@ impl<'a> Parser<'a> for ExternalIdToken {
         let (system, cursor) = SystemLiteralToken.parse(cursor)?;
 
         if let Some(pub_id) = pub_id {
-            Ok((ExternalId::Public { pub_id, system }, cursor))
+            Ok((
+                ExternalId::Public {
+                    pub_id: pub_id.to_string(),
+                    system: system.to_string(),
+                },
+                cursor,
+            ))
         } else {
-            Ok((ExternalId::System { system }, cursor))
+            Ok((
+                ExternalId::System {
+                    system: system.to_string(),
+                },
+                cursor,
+            ))
         }
     }
 }
@@ -290,7 +301,9 @@ mod tests {
                 .unwrap();
             assert!(cursor.is_at_end());
             assert_eq!(
-                Some(ExternalId::System { system: "abc" }),
+                Some(ExternalId::System {
+                    system: "abc".to_string()
+                }),
                 dtd.external_id()
             );
         }
@@ -302,7 +315,9 @@ mod tests {
                 .unwrap();
             assert!(cursor.is_at_end());
             assert_eq!(
-                Some(ExternalId::System { system: "abc" }),
+                Some(ExternalId::System {
+                    system: "abc".to_string()
+                }),
                 dtd.external_id()
             );
         }
@@ -315,8 +330,8 @@ mod tests {
             assert!(cursor.is_at_end());
             assert_eq!(
                 Some(ExternalId::Public {
-                    pub_id: "pubid",
-                    system: "system"
+                    pub_id: "pubid".to_string(),
+                    system: "system".to_string()
                 }),
                 dtd.external_id()
             );
@@ -330,8 +345,8 @@ mod tests {
             assert!(cursor.is_at_end());
             assert_eq!(
                 Some(ExternalId::Public {
-                    pub_id: "pubid",
-                    system: "system"
+                    pub_id: "pubid".to_string(),
+                    system: "system".to_string()
                 }),
                 dtd.external_id()
             );

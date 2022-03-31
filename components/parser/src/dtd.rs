@@ -2,17 +2,17 @@ use crate::PI;
 
 /// Document Type Definition
 #[derive(Clone, Debug, PartialEq)]
-pub struct DocTypeDecl<'a> {
-    root_element_name: &'a str,
-    external_id: Option<ExternalId<'a>>,
-    int_subset: Option<IntSubset<'a>>,
+pub struct DocTypeDecl {
+    root_element_name: String,
+    external_id: Option<ExternalId>,
+    int_subset: Option<IntSubset>,
 }
 
-impl<'a> DocTypeDecl<'a> {
+impl DocTypeDecl {
     pub fn new(
-        root_element_name: &'a str,
-        external_id: Option<ExternalId<'a>>,
-        int_subset: Option<IntSubset<'a>>,
+        root_element_name: String,
+        external_id: Option<ExternalId>,
+        int_subset: Option<IntSubset>,
     ) -> Self {
         Self {
             root_element_name,
@@ -21,49 +21,49 @@ impl<'a> DocTypeDecl<'a> {
         }
     }
 
-    pub fn root_element_name(&self) -> &'a str {
-        self.root_element_name
+    pub fn root_element_name(&self) -> &str {
+        &self.root_element_name
     }
 
-    pub fn external_id(&self) -> Option<ExternalId<'a>> {
+    pub fn external_id(&self) -> Option<ExternalId> {
         self.external_id.clone()
     }
-    pub fn int_subset(&self) -> &Option<IntSubset<'a>> {
+    pub fn int_subset(&self) -> &Option<IntSubset> {
         &self.int_subset
     }
 }
 
 /// External ID
 #[derive(Clone, Debug, PartialEq)]
-pub enum ExternalId<'a> {
-    System { system: &'a str },
-    Public { pub_id: &'a str, system: &'a str },
+pub enum ExternalId {
+    System { system: String },
+    Public { pub_id: String, system: String },
 }
 
 /// Internal Subset
 #[derive(Clone, Debug, PartialEq)]
-pub struct IntSubset<'a> {
-    decls: Vec<MarkupDeclEntry<'a>>,
+pub struct IntSubset {
+    decls: Vec<MarkupDeclEntry>,
 }
 
-impl<'a> IntSubset<'a> {
-    pub fn new(decls: Vec<MarkupDeclEntry<'a>>) -> Self {
+impl IntSubset {
+    pub fn new(decls: Vec<MarkupDeclEntry>) -> Self {
         Self { decls }
     }
 
-    pub fn decls(&self) -> &[MarkupDeclEntry<'a>] {
+    pub fn decls(&self) -> &[MarkupDeclEntry] {
         &self.decls
     }
 }
 
 /// Entry of Markup Declaration
 #[derive(Clone, Debug, PartialEq)]
-pub enum MarkupDeclEntry<'a> {
-    Element(&'a str),
-    AttList(&'a str),
-    Entity(&'a str),
-    Notation(&'a str),
-    PI(PI<'a>),
-    Comment(&'a str),
-    PEReference(&'a str),
+pub enum MarkupDeclEntry {
+    Element(String),
+    AttList(String),
+    Entity(String),
+    Notation(String),
+    PI(PI<'static>),
+    Comment(String),
+    PEReference(String),
 }

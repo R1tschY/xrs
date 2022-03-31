@@ -19,6 +19,7 @@ use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::XmlEvent::Characters;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent, PI};
 
+pub mod buffer;
 pub mod dtd;
 pub mod entities;
 
@@ -224,8 +225,8 @@ impl<'a> Parser<'a> for PIToken {
 
         Ok((
             PI {
-                target,
-                data: maybe_data.map(|data| data.1).unwrap_or(""),
+                target: Cow::Borrowed(target),
+                data: Cow::Borrowed(maybe_data.map(|data| data.1).unwrap_or("")),
             },
             cursor,
         ))
@@ -259,7 +260,7 @@ impl<'a> Parser<'a> for CDataToken {
 struct XmlDeclToken;
 
 impl<'a> Parser<'a> for XmlDeclToken {
-    type Attribute = XmlDecl<'a>;
+    type Attribute = XmlDecl;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
@@ -272,8 +273,8 @@ impl<'a> Parser<'a> for XmlDeclToken {
 
         Ok((
             XmlDecl {
-                version,
-                encoding,
+                version: version.to_string(),
+                encoding: encoding.map(|encoding| encoding.to_string()),
                 standalone,
             },
             cursor,
@@ -516,15 +517,15 @@ fn expect_byte(cursor: Cursor, c: u8, err: fn() -> XmlError) -> Result<Cursor, X
 pub struct Entity {
     name: String,
     external: bool,
-    text: String,
+    text: Rc<str>,
 }
 
 impl Entity {
-    pub fn new(name: impl ToString, text: impl ToString) -> Self {
+    pub fn new(name: impl ToString, text: impl Into<Rc<str>>) -> Self {
         Self {
             name: name.to_string(),
             external: false,
-            text: text.to_string(),
+            text: text.into(),
         }
     }
 }
@@ -548,7 +549,7 @@ impl Default for Entities {
 }
 
 impl Entities {
-    pub fn register(&mut self, name: impl ToString, value: impl ToString) {
+    pub fn register(&mut self, name: impl ToString, value: impl Into<Rc<str>>) {
         self.defined
             .insert(name.to_string(), Rc::new(Entity::new(name, value)));
     }
@@ -562,18 +563,252 @@ impl Entities {
     }
 }
 
-struct Subparser<'a> {
+trait InternalXmlParser<'a> {
+    fn stack_push(&mut self, tag: &'a str);
+    fn attributes_push(&mut self, name: &'a str, value: &'a str);
+    fn stack_pop(&mut self) -> Option<Cow<'a, str>>;
+    fn set_version(&mut self, version: String);
+    fn set_empty(&mut self, v: bool);
+    fn set_seen_root(&mut self);
+    fn set_cursor(&mut self, cur: Cursor<'a>);
+
+    fn exists_attribute_name(&self, name: &'a str) -> bool;
+    fn get_version(&self) -> Option<&str>;
+    fn is_empty(&self) -> bool;
+    fn is_after_root(&self) -> bool;
+    fn cursor(&self) -> Cursor<'a>;
+
+    // Parser functions
+
+    fn parse_stag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        if self.is_after_root() {
+            return Err(XmlError::ExpectedDocumentEnd);
+        }
+
+        let (name, mut cursor) = NameToken.parse(self.cursor())?;
+        let mut got_whitespace = if let Ok((_, cur)) = SToken.parse(cursor) {
+            cursor = cur;
+            true
+        } else {
+            false
+        };
+
+        while let Some(c) = cursor.next_byte(0) {
+            // /> empty end
+            if c == b'/' {
+                return if Some(b'>') == cursor.next_byte(1) {
+                    self.set_cursor(cursor.advance(2));
+                    self.set_empty(true);
+                    self.set_seen_root();
+                    self.stack_push(name);
+                    Ok(Some(XmlEvent::stag(name, true)))
+                } else {
+                    Err(XmlError::ExpectedElementEnd)
+                };
+            }
+
+            // normal end
+            if c == b'>' {
+                self.set_cursor(cursor.advance(1));
+                self.set_empty(false);
+                self.set_seen_root();
+                self.stack_push(name);
+                return Ok(Some(XmlEvent::stag(name, false)));
+            }
+
+            // attribute
+            if !got_whitespace {
+                return Err(XmlError::ExpectedWhitespace);
+            }
+
+            let (attr_name, cur) = NameToken.parse(cursor)?;
+            let (_, cur) = EqToken.parse(cur)?;
+            let (value, cur) = AttValueToken.parse(cur)?;
+            if let Ok((_, cur)) = SToken.parse(cur) {
+                cursor = cur;
+                got_whitespace = true;
+            } else {
+                cursor = cur;
+                got_whitespace = false;
+            }
+
+            if self.exists_attribute_name(attr_name) {
+                return Err(XmlError::NonUniqueAttribute {
+                    attribute: attr_name.to_string(),
+                });
+            }
+
+            self.attributes_push(attr_name, value);
+        }
+
+        Err(XmlError::ExpectedElementEnd)
+    }
+
+    fn parse_etag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        // TODO: xml_lit(self.stack.pop()) should be faster
+        let (name, cursor) = NameToken.parse(self.cursor())?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
+        self.set_cursor(cursor);
+
+        if let Some(expected_name) = self.stack_pop() {
+            if expected_name == name {
+                Ok(Some(XmlEvent::etag(name)))
+            } else {
+                Err(XmlError::WrongETagName {
+                    expected_name: expected_name.to_string(),
+                })
+            }
+        } else {
+            Err(XmlError::ETagAfterRootElement)
+        }
+    }
+
+    fn parse_decl(&mut self, doc: &mut DocumentContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (decl, cursor) = XmlDeclToken.parse(self.cursor())?;
+
+        self.set_version(decl.version.to_string());
+        doc.standalone = decl.standalone;
+
+        if let Some(encoding) = &decl.encoding {
+            if encoding != "UTF-8" {
+                return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
+            }
+        }
+
+        self.set_cursor(cursor);
+        Ok(Some(XmlEvent::XmlDecl(decl)))
+    }
+
+    fn parse_doctypedecl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (decl, cursor) = DocTypeDeclToken.parse(self.cursor())?;
+        self.set_cursor(cursor);
+        Ok(Some(XmlEvent::Dtd(Box::new(decl))))
+    }
+
+    fn parse_pi(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (pi, cursor) = PIToken.parse(self.cursor())?;
+        self.set_cursor(cursor);
+        Ok(Some(XmlEvent::PI(pi)))
+    }
+
+    fn parse_comment(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (comment, cursor) = CommentToken.parse(self.cursor())?;
+        self.set_cursor(cursor);
+        Ok(Some(XmlEvent::Comment(Cow::Borrowed(comment))))
+    }
+
+    fn parse_cdata(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let (cdata, cursor) = CDataToken.parse(self.cursor())?;
+        self.set_cursor(cursor);
+        Ok(Some(XmlEvent::Characters(cdata.into())))
+    }
+
+    fn parse_characters(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        if let Some((i, _)) = self
+            .cursor()
+            .rest_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, &c)| c == b'<' || c == b'&')
+        {
+            let (chars, cursor) = self.cursor().advance2(i);
+            self.set_cursor(cursor);
+            // TODO: ]]> not allowed
+            Ok(Some(Characters(chars.into())))
+        } else {
+            Err(UnexpectedEof)
+        }
+    }
+
+    fn parse_reference(
+        &mut self,
+        ctx: &mut DocumentContext,
+    ) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        let cur = self.cursor();
+        if let Some(c) = cur.next_byte(1) {
+            if c == b'#' {
+                let (character, cursor) = CharRefToken.parse(cur)?;
+                self.set_cursor(cursor);
+                Ok(Some(XmlEvent::Characters(character.into())))
+            } else {
+                let (entity_ref, cursor) = EntityRefToken.parse(cur)?;
+                if let Some(entity) = ctx.entities.get_rc(entity_ref) {
+                    self.set_cursor(cursor);
+                    ctx.next_entity = Some(entity);
+                    Ok(None)
+                } else {
+                    Err(XmlError::UnknownEntity(entity_ref.to_string()))
+                }
+            }
+        } else {
+            Err(XmlError::IllegalReference)
+        }
+    }
+}
+
+struct DocumentParser<'a> {
     cursor: Cursor<'a>,
     attributes: Vec<Attribute<'a>>,
     empty: bool,
     seen_root: bool,
     stack: Vec<&'a str>,
-    version: Option<&'a str>,
+    version: Option<String>,
 }
 
-impl<'a> Subparser<'a> {
+impl<'a> InternalXmlParser<'a> for DocumentParser<'a> {
+    fn stack_push(&mut self, tag: &'a str) {
+        self.stack.push(tag);
+    }
+
+    fn attributes_push(&mut self, name: &'a str, value: &'a str) {
+        self.attributes.push(Attribute::new(name, value));
+    }
+
+    fn stack_pop(&mut self) -> Option<Cow<'a, str>> {
+        self.stack.pop().map(|tag| tag.into())
+    }
+
+    fn set_version(&mut self, version: String) {
+        self.version = Some(version);
+    }
+
+    fn set_empty(&mut self, v: bool) {
+        self.empty = v;
+    }
+
+    fn set_seen_root(&mut self) {
+        self.seen_root = true;
+    }
+
+    fn set_cursor(&mut self, cur: Cursor<'a>) {
+        self.cursor = cur;
+    }
+
+    fn exists_attribute_name(&self, name: &'a str) -> bool {
+        self.attributes.iter().any(|attr| attr.name == name)
+    }
+
+    fn get_version(&self) -> Option<&str> {
+        self.version.as_ref().map(|v| v as &str)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.empty
+    }
+
+    fn is_after_root(&self) -> bool {
+        self.stack.is_empty() && self.seen_root
+    }
+
+    fn cursor(&self) -> Cursor<'a> {
+        self.cursor
+    }
+}
+
+impl<'a> DocumentParser<'a> {
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self, ctx: &mut ParserContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
+    pub fn next(&mut self, ctx: &mut DocumentContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
         self.attributes.clear();
         if self.empty {
             self.empty = false;
@@ -589,6 +824,10 @@ impl<'a> Subparser<'a> {
                     if let Some(c) = self.cursor.next_byte(1) {
                         if c == b'/' {
                             self.cursor = self.cursor.advance(2);
+
+                            if self.is_after_root() {
+                                return Err(XmlError::ExpectedDocumentEnd);
+                            }
                             self.parse_etag()
                         } else if c == b'?' {
                             if self.is_prolog() && self.version.is_none() {
@@ -649,201 +888,222 @@ impl<'a> Subparser<'a> {
         !self.seen_root
     }
 
-    fn is_after_root(&self) -> bool {
-        self.stack.is_empty() && self.seen_root
+    pub fn attributes(&self) -> &[Attribute<'a>] {
+        &self.attributes
     }
 
-    fn parse_stag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        if self.is_after_root() {
-            return Err(XmlError::ExpectedDocumentEnd);
-        }
-
-        let (name, mut cursor) = NameToken.parse(self.cursor)?;
-        let mut got_whitespace = if let Ok((_, cur)) = SToken.parse(cursor) {
-            cursor = cur;
-            true
-        } else {
-            false
-        };
-
-        while let Some(c) = cursor.next_byte(0) {
-            // /> empty end
-            if c == b'/' {
-                return if Some(b'>') == cursor.next_byte(1) {
-                    self.cursor = cursor.advance(2);
-                    self.empty = true;
-                    self.seen_root = true;
-                    self.stack.push(name);
-                    Ok(Some(XmlEvent::stag(name, true)))
-                } else {
-                    Err(XmlError::ExpectedElementEnd)
-                };
-            }
-
-            // normal end
-            if c == b'>' {
-                self.cursor = cursor.advance(1);
-                self.empty = false;
-                self.seen_root = true;
-                self.stack.push(name);
-                return Ok(Some(XmlEvent::stag(name, false)));
-            }
-
-            // attribute
-            if !got_whitespace {
-                return Err(XmlError::ExpectedWhitespace);
-            }
-
-            let (attr_name, cur) = NameToken.parse(cursor)?;
-            let (_, cur) = EqToken.parse(cur)?;
-            let (raw_value, cur) = AttValueToken.parse(cur)?;
-            if let Ok((_, cur)) = SToken.parse(cur) {
-                cursor = cur;
-                got_whitespace = true;
-            } else {
-                cursor = cur;
-                got_whitespace = false;
-            }
-
-            if self.attributes.iter().any(|attr| attr.name == attr_name) {
-                return Err(XmlError::NonUniqueAttribute {
-                    attribute: attr_name.to_string(),
-                });
-            }
-
-            self.attributes.push(Attribute {
-                name: attr_name,
-                raw_value,
-            });
-        }
-
-        Err(XmlError::ExpectedElementEnd)
+    pub fn offset(&self) -> usize {
+        self.cursor.offset()
     }
+}
 
-    fn parse_etag(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        if self.is_after_root() {
-            return Err(XmlError::ExpectedDocumentEnd);
-        }
+struct EntityParserState {
+    entity: Rc<Entity>,
+    state: InnerEntityParserState,
+}
 
-        // TODO: xml_lit(self.stack.pop()) should be faster
-        let (name, cursor) = NameToken.parse(self.cursor)?;
-        let (_, cursor) = optional(SToken).parse(cursor)?;
-        let cursor = expect_byte(cursor, b'>', || XmlError::ExpectedElementEnd)?;
-        self.cursor = cursor;
-
-        if let Some(expected_name) = self.stack.pop() {
-            if expected_name == name {
-                Ok(Some(XmlEvent::ETag(ETag { name })))
-            } else {
-                Err(XmlError::WrongETagName {
-                    expected_name: expected_name.to_string(),
-                })
-            }
-        } else {
-            Err(XmlError::ETagAfterRootElement)
+impl EntityParserState {
+    fn new(entity: Rc<Entity>) -> Self {
+        Self {
+            entity,
+            state: InnerEntityParserState {
+                offset: 0,
+                attributes: vec![],
+                empty: false,
+                seen_root: false,
+                stack: vec![],
+                version: None,
+            },
         }
     }
 
-    fn parse_decl(&mut self, doc: &mut ParserContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (decl, cursor) = XmlDeclToken.parse(self.cursor)?;
-
-        self.version = Some(decl.version);
-        doc.standalone = decl.standalone;
-
-        if let Some(encoding) = decl.encoding {
-            if encoding != "UTF-8" {
-                return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
-            }
-        }
-
-        self.cursor = cursor;
-        Ok(Some(XmlEvent::XmlDecl(decl)))
+    fn entity(&self) -> &Entity {
+        &self.entity
     }
 
-    fn parse_doctypedecl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (decl, cursor) = DocTypeDeclToken.parse(self.cursor)?;
-        self.cursor = cursor;
-        Ok(Some(XmlEvent::Dtd(decl)))
+    fn attributes(&self) -> &[Attribute<'static>] {
+        &self.state.attributes
     }
 
-    fn parse_pi(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (pi, cursor) = PIToken.parse(self.cursor)?;
-        self.cursor = cursor;
-        Ok(Some(XmlEvent::PI(pi)))
+    fn offset(&self) -> usize {
+        self.state.offset
     }
+}
 
-    fn parse_comment(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (comment, cursor) = CommentToken.parse(self.cursor)?;
-        self.cursor = cursor;
-        Ok(Some(XmlEvent::Comment(comment)))
-    }
+struct InnerEntityParserState {
+    offset: usize,
+    attributes: Vec<Attribute<'static>>,
+    empty: bool,
+    seen_root: bool,
+    stack: Vec<String>,
+    version: Option<String>,
+}
 
-    fn parse_cdata(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        let (cdata, cursor) = CDataToken.parse(self.cursor)?;
-        self.cursor = cursor;
-        Ok(Some(XmlEvent::Characters(cdata.into())))
-    }
+struct EntityParser<'a> {
+    cursor: Cursor<'a>,
+    state: &'a mut InnerEntityParserState,
+}
 
-    fn parse_characters(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        if let Some((i, _)) = self
-            .cursor
-            .rest_bytes()
-            .iter()
-            .enumerate()
-            .find(|(_, &c)| c == b'<' || c == b'&')
-        {
-            let (chars, cur) = self.cursor.advance2(i);
-            self.cursor = cur;
-            // TODO: ]]> not allowed
-            Ok(Some(Characters(chars.into())))
-        } else {
-            Err(UnexpectedEof)
-        }
-    }
-
-    fn parse_reference(
-        &mut self,
-        ctx: &mut ParserContext,
-    ) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        if let Some(c) = self.cursor.next_byte(1) {
-            if c == b'#' {
-                let (character, cursor) = CharRefToken.parse(self.cursor)?;
-                self.cursor = cursor;
-                Ok(Some(XmlEvent::Characters(character.into())))
-            } else {
-                let (entity_ref, cursor) = EntityRefToken.parse(self.cursor)?;
-                if let Some(entity) = ctx.entities.get_rc(entity_ref) {
-                    self.cursor = cursor;
-                    todo!()
-                } else {
-                    Err(XmlError::UnknownEntity(entity_ref.to_string()))
-                }
-            }
-        } else {
-            Err(XmlError::IllegalReference)
+impl<'a> EntityParser<'a> {
+    fn new(parser: &'a mut InnerEntityParserState, entity: &'a Entity) -> Self {
+        Self {
+            cursor: Cursor::new(&entity.text).advance(parser.offset),
+            state: parser,
         }
     }
 }
 
-pub struct ParserContext {
-    standalone: Option<bool>,
-    entities: Entities,
-    xml_lang: Option<String>,
+impl<'a> InternalXmlParser<'a> for EntityParser<'a> {
+    fn stack_push(&mut self, tag: &'a str) {
+        self.state.stack.push(tag.to_string())
+    }
 
-    next_entity: Option<Entity>,
+    fn attributes_push(&mut self, name: &'a str, value: &'a str) {
+        self.state
+            .attributes
+            .push(Attribute::new(name.to_string(), value.to_string()))
+    }
+
+    fn stack_pop(&mut self) -> Option<Cow<'a, str>> {
+        self.state.stack.pop().map(|tag| tag.into())
+    }
+
+    fn set_version(&mut self, version: String) {
+        self.state.version = Some(version);
+    }
+
+    fn set_empty(&mut self, v: bool) {
+        self.state.empty = v;
+    }
+
+    fn set_seen_root(&mut self) {
+        self.state.seen_root = true;
+    }
+
+    fn set_cursor(&mut self, cur: Cursor<'a>) {
+        self.cursor = cur;
+        self.state.offset = cur.offset();
+    }
+
+    fn exists_attribute_name(&self, name: &str) -> bool {
+        self.state.attributes.iter().any(|attr| attr.name == name)
+    }
+
+    fn get_version(&self) -> Option<&str> {
+        self.state.version.as_ref().map(|s| s as &str)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.state.empty
+    }
+
+    fn is_after_root(&self) -> bool {
+        self.state.stack.is_empty() && self.state.seen_root
+    }
+
+    fn cursor(&self) -> Cursor<'a> {
+        self.cursor
+    }
+}
+
+impl<'a> EntityParser<'a> {
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self, ctx: &mut DocumentContext) -> Result<Option<XmlEvent<'a>>, XmlError> {
+        self.state.attributes.clear();
+        if self.state.empty {
+            self.state.empty = false;
+            if let Some(name) = self.state.stack.pop() {
+                return Ok(Some(XmlEvent::etag(name)));
+            }
+            unreachable!()
+        }
+
+        let cursor = self.cursor();
+        while let Some(c) = cursor.next_byte(0) {
+            return match c {
+                b'<' => {
+                    if let Some(c) = cursor.next_byte(1) {
+                        if c == b'/' {
+                            self.set_cursor(cursor.advance(2));
+                            self.parse_etag()
+                        } else if c == b'?' {
+                            if self.is_prolog() && self.state.version.is_none() {
+                                // TODO: not correct
+                                if cursor.has_next_str("<?xml") {
+                                    self.parse_decl(ctx)
+                                } else {
+                                    self.parse_pi()
+                                }
+                            } else {
+                                self.parse_pi()
+                            }
+                        } else if c == b'!' {
+                            if cursor.has_next_str("<!--") {
+                                self.parse_comment()
+                            } else if cursor.has_next_str("<!DOCTYPE") {
+                                self.parse_doctypedecl()
+                            } else if cursor.has_next_str("<![CDATA[") {
+                                self.parse_cdata()
+                            } else {
+                                Err(XmlError::ExpectedElementStart)
+                            }
+                        } else {
+                            self.set_cursor(cursor.advance(1));
+                            self.parse_stag()
+                        }
+                    } else {
+                        Err(XmlError::ExpectedElementStart)
+                    }
+                }
+                b'&' => self.parse_reference(ctx),
+                _ => {
+                    if self.state.stack.is_empty() {
+                        // only white space allowed
+                        if c.is_xml_whitespace() {
+                            let (_, cur) = SToken.parse(cursor)?;
+                            self.set_cursor(cur);
+                            continue;
+                        } else {
+                            Err(UnexpectedCharacter(cursor.next_char().unwrap()))
+                        }
+                    } else {
+                        self.parse_characters()
+                    }
+                }
+            };
+        }
+
+        if !self.state.stack.is_empty() {
+            Err(XmlError::OpenElementAtEof)
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[inline]
+    pub fn is_prolog(&self) -> bool {
+        !self.state.seen_root
+    }
+}
+
+struct DocumentContext {
+    standalone: Option<bool>,
+    version: Option<String>,
+    entities: Entities,
+    next_entity: Option<Rc<Entity>>,
 }
 
 /// XMl Pull Parser
 pub struct Reader<'a> {
-    root_parser: Subparser<'a>,
-    sub_parsers: Vec<Subparser<'static>>,
-    ctx: ParserContext,
+    root_parser: DocumentParser<'a>,
+    sub_parsers: Vec<EntityParserState>,
+    ctx: DocumentContext,
 }
 
 impl<'a> Reader<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            root_parser: Subparser {
+            root_parser: DocumentParser {
                 cursor: Cursor::new(input),
                 attributes: Vec::with_capacity(4),
                 empty: false,
@@ -852,43 +1112,42 @@ impl<'a> Reader<'a> {
                 stack: vec![],
             },
             sub_parsers: vec![],
-            ctx: ParserContext {
+            ctx: DocumentContext {
                 standalone: None,
+                version: None,
                 entities: Default::default(),
-                xml_lang: None,
-
                 next_entity: None,
             },
         }
     }
 
-    fn get_current_parser(&self) -> &Subparser<'a> {
+    pub fn attributes(&self) -> &[Attribute<'a>] {
         if let Some(parser) = self.sub_parsers.last() {
-            &parser
+            parser.attributes()
         } else {
-            &self.root_parser
+            self.root_parser.attributes()
         }
     }
 
     #[inline]
-    pub fn attributes(&self) -> &[Attribute<'a>] {
-        &self.get_current_parser().attributes
-    }
-
-    #[inline]
     pub fn cursor_offset(&self) -> usize {
-        self.get_current_parser().cursor.offset()
+        if let Some(parser) = self.sub_parsers.last() {
+            parser.offset()
+        } else {
+            self.root_parser.offset()
+        }
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let evt = if let Some(parser) = self.sub_parsers.last_mut() {
-            let result = parser.next(&mut self.ctx);
+            let mut tmp_parser = EntityParser::new(&mut parser.state, &parser.entity);
+            let result = tmp_parser.next(&mut self.ctx);
             return if result == Ok(None) {
                 self.sub_parsers.pop();
                 self.next()
             } else {
-                result
+                result.map(|evt| evt.map(|evt| evt.into_owned()))
             };
         } else {
             self.root_parser.next(&mut self.ctx)
@@ -896,16 +1155,9 @@ impl<'a> Reader<'a> {
 
         match evt {
             Ok(None) => {
-                if let Some(entity) = &self.ctx.next_entity {
-                    todo!()
-                    // self.sub_parsers.push(Subparser {
-                    //     cursor: Cursor::new(entity.text),
-                    //     attributes: vec![],
-                    //     empty: false,
-                    //     seen_root: false,
-                    //     version: None,
-                    //     stack: vec![],
-                    // });
+                if let Some(entity) = self.ctx.next_entity.take() {
+                    self.sub_parsers.push(EntityParserState::new(entity));
+                    self.next()
                 } else {
                     Ok(None)
                 }
@@ -922,9 +1174,10 @@ mod tests {
     use crate::{Attribute, XmlError};
 
     macro_rules! assert_evt {
-        ($exp:expr, $reader:expr) => {
-            assert_eq!($exp, $reader.next(), "error at {}", $reader.cursor_offset())
-        };
+        ($exp:expr, $reader:expr) => {{
+            let evt = $reader.next();
+            assert_eq!($exp, evt, "error at {}", $reader.cursor_offset())
+        }};
     }
 
     macro_rules! assert_evt_matches {
@@ -1391,7 +1644,7 @@ mod tests {
             let mut reader = Reader::new("<e>test&#x20;seq</e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(Ok(Some(XmlEvent::characters("test"))), reader);
-            assert_evt!(Ok(Some(XmlEvent::characters(" "))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{20}"))), reader);
             assert_evt!(Ok(Some(XmlEvent::characters("seq"))), reader);
             assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
@@ -1459,6 +1712,63 @@ mod tests {
             assert_evt!(Ok(Some(XmlEvent::characters("<"))), reader);
             assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
             assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn replace_gt() {
+            let mut reader = Reader::new("<e>&gt;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters(">"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn replace_amp() {
+            let mut reader = Reader::new("<e>&amp;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("&"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn replace_apos() {
+            let mut reader = Reader::new("<e>&apos;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("'"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn replace_quot() {
+            let mut reader = Reader::new("<e>&quot;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\""))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn fail_on_open() {
+            let mut reader = Reader::new("<e>&quot</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::ExpectToken(";")), reader);
+        }
+
+        #[test]
+        fn fail_on_unknown_entity() {
+            let mut reader = Reader::new("<e>&nent;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::UnknownEntity("nent".to_string())), reader);
+        }
+
+        #[test]
+        fn fail_on_open2() {
+            let mut reader = Reader::new("<e>&lt&gt;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::ExpectToken(";")), reader);
         }
     }
 }

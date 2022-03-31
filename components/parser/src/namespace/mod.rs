@@ -10,12 +10,50 @@ pub mod stack;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct QName<'a> {
-    prefix: Option<&'a str>,
-    local_part: &'a str,
+    prefix: Option<Cow<'a, str>>,
+    local_part: Cow<'a, str>,
 }
 
 impl<'a> QName<'a> {
+    pub fn from_cow(input: Cow<'a, str>) -> Result<Self, XmlError> {
+        match input {
+            Cow::Borrowed(borrowed) => Self::from_str(borrowed),
+            Cow::Owned(owned) => Self::from_string(owned),
+        }
+    }
+
+    pub fn from_string(mut input: String) -> Result<Self, XmlError> {
+        let mut spliter = input.split(|c| c == ':');
+        if let Some(first) = spliter.next() {
+            if let Some(second) = spliter.next() {
+                if spliter.next().is_some() {
+                    Err(XmlError::IllegalName {
+                        name: input.to_string(),
+                    })
+                } else {
+                    let prefix_bytes = first.len();
+                    let local_part = second.to_string();
+                    input.truncate(prefix_bytes);
+                    Ok(QName {
+                        prefix: Some(input.into()),
+                        local_part: local_part.into(),
+                    })
+                }
+            } else {
+                Ok(QName {
+                    prefix: None,
+                    local_part: input.into(),
+                })
+            }
+        } else {
+            Err(XmlError::IllegalName {
+                name: String::new(),
+            })
+        }
+    }
+
     pub fn from_str(input: &'a str) -> Result<Self, XmlError> {
+        // TODO: split_once faster?
         let mut spliter = input.split(|c| c == ':');
         if let Some(first) = spliter.next() {
             if let Some(second) = spliter.next() {
@@ -25,14 +63,14 @@ impl<'a> QName<'a> {
                     })
                 } else {
                     Ok(QName {
-                        prefix: Some(first),
-                        local_part: second,
+                        prefix: Some(Cow::Borrowed(first)),
+                        local_part: Cow::Borrowed(second),
                     })
                 }
             } else {
                 Ok(QName {
                     prefix: None,
-                    local_part: first,
+                    local_part: Cow::Borrowed(first),
                 })
             }
         } else {
@@ -65,16 +103,19 @@ pub struct NsSTag<'a> {
 #[derive(Clone, PartialEq)]
 pub struct NsAttribute<'a> {
     qname: QName<'a>,
-    raw_value: &'a str,
+    value: Cow<'a, str>,
 }
 
 impl<'a> NsAttribute<'a> {
-    pub fn new(qname: QName<'a>, raw_value: &'a str) -> Self {
-        Self { qname, raw_value }
+    pub fn new(qname: QName<'a>, value: impl Into<Cow<'a, str>>) -> Self {
+        Self {
+            qname,
+            value: value.into(),
+        }
     }
 
-    pub fn raw_value(&self) -> &str {
-        self.raw_value
+    pub fn value(&self) -> &str {
+        self.value.as_ref()
     }
 
     pub fn qname(&self) -> QName<'a> {
@@ -86,7 +127,7 @@ impl<'a> fmt::Debug for NsAttribute<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Attribute")
             .field("name", &self.qname)
-            .field("value", &self.raw_value)
+            .field("value", &self.value)
             .finish()
     }
 }
@@ -116,11 +157,11 @@ impl<'a> NsETag<'a> {
 /// XML event with namespace parsing
 #[derive(Clone, Debug, PartialEq)]
 pub enum XmlNsEvent<'a> {
-    XmlDecl(XmlDecl<'a>),
-    Dtd(DocTypeDecl<'a>),
+    XmlDecl(XmlDecl),
+    Dtd(Box<DocTypeDecl>),
     STag(NsSTag<'a>),
     ETag(NsETag<'a>),
     Characters(Cow<'a, str>),
     PI(PI<'a>),
-    Comment(&'a str),
+    Comment(Cow<'a, str>),
 }

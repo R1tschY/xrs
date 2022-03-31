@@ -44,7 +44,7 @@ impl ReaderIT {
     ) -> Result<(), XmlError> {
         write!(writer, "<{}", stag.name());
         for attr in reader.attributes() {
-            write!(writer, " {}=\"{}\"", attr.name(), attr.raw_value());
+            write!(writer, " {}=\"{}\"", attr.name(), attr.value());
         }
         write!(writer, ">");
         Ok(())
@@ -55,7 +55,7 @@ impl ReaderIT {
         Ok(())
     }
 
-    fn write_decl<'a>(&self, writer: &mut String, decl: XmlDecl<'a>) -> Result<(), XmlError> {
+    fn write_decl<'a>(&self, writer: &mut String, decl: XmlDecl) -> Result<(), XmlError> {
         if decl.version() != "1.0" {
             write!(writer, "<?xml version=\"{}\"/>", decl.version());
         }
