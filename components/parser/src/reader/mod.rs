@@ -710,7 +710,7 @@ trait InternalXmlParser<'a> {
             .rest_bytes()
             .iter()
             .enumerate()
-            .find(|(_, &c)| c == b'<' || c == b'&')
+            .find(|(_, &c)| c == b'<' || c == b'&' || c == b'\r')
         {
             let (chars, cursor) = self.cursor().advance2(i);
             self.set_cursor(cursor);
@@ -743,6 +743,17 @@ trait InternalXmlParser<'a> {
             }
         } else {
             Err(XmlError::IllegalReference)
+        }
+    }
+
+    fn parse_carriage_return(&mut self) -> Option<XmlEvent<'a>> {
+        let cursor = self.cursor();
+        let c = cursor.next_byte(1);
+        self.set_cursor(cursor.advance(1));
+        if c == Some(b'\n') {
+            None
+        } else {
+            Some(XmlEvent::characters("\n"))
         }
     }
 }
@@ -859,6 +870,13 @@ impl<'a> DocumentParser<'a> {
                     }
                 }
                 b'&' => self.parse_reference(ctx),
+                b'\r' => {
+                    if let Some(evt) = self.parse_carriage_return() {
+                        Ok(Some(evt))
+                    } else {
+                        continue;
+                    }
+                }
                 _ => {
                     if self.stack.is_empty() {
                         // only white space allowed
@@ -1056,6 +1074,13 @@ impl<'a> EntityParser<'a> {
                     }
                 }
                 b'&' => self.parse_reference(ctx),
+                b'\r' => {
+                    if let Some(evt) = self.parse_carriage_return() {
+                        Ok(Some(evt))
+                    } else {
+                        continue;
+                    }
+                }
                 _ => {
                     if self.state.stack.is_empty() {
                         // only white space allowed
@@ -1769,6 +1794,61 @@ mod tests {
             let mut reader = Reader::new("<e>&lt&gt;</e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(Err(XmlError::ExpectToken(";")), reader);
+        }
+    }
+
+    /// 2.11 End-of-Line Handling
+    mod end_of_line_handling {
+        use crate::reader::Reader;
+        use crate::{XmlDecl, XmlError, XmlEvent};
+
+        #[test]
+        fn passthrough_line_feed() {
+            let mut reader = Reader::new("<e>a\nb</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("a\nb"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn convert_carriage_return() {
+            let mut reader = Reader::new("<e>a\rb</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("a"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\n"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("b"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn ignore_carriage_return_before_line_feed() {
+            let mut reader = Reader::new("<e>a\r\nb</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("a"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\nb"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn ignore_carriage_return_before_line_feed2() {
+            let mut reader = Reader::new("<e>a\r\n</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("a"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\n"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn ignore_carriage_return_before_line_feed3() {
+            let mut reader = Reader::new("<e>\r\n</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\n"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
         }
     }
 }
