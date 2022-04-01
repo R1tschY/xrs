@@ -257,6 +257,7 @@ pub enum XmlError {
         expected_name: String,
     },
     UnexpectedEof,
+    UnexpectedDtdEntry,
     CDataEndInContent,
     ETagAfterRootElement,
     OpenElementAtEof,

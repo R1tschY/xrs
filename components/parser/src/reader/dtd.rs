@@ -1,6 +1,6 @@
 use xml_chars::{XmlAsciiChar, XmlChar};
 
-use crate::dtd::{DocTypeDecl, ExternalId, IntSubset, MarkupDeclEntry};
+use crate::dtd::{ContentSpec, DocTypeDecl, Element, ExternalId, IntSubset, MarkupDeclEntry};
 use crate::parser::core::{kleene, optional, Kleene, Optional};
 use crate::parser::helper::map_error;
 use crate::parser::string::lit;
@@ -94,39 +94,25 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
         let (external_id, cursor) = optional((SToken, ExternalIdToken)).parse(cursor)?;
         let external_id = external_id.map(|v| v.1);
         let (_, cursor) = optional(SToken).parse(cursor)?;
-        // let (_, cursor) = optional((xml_lit("["), IntSubsetToken, xml_lit("]"), optional(SToken)))
-        //     .parse(cursor)?;
+        let (raw_internal, cursor) =
+            optional((xml_lit("["), IntSubsetToken, xml_lit("]"), optional(SToken)))
+                .parse(cursor)?;
         let (_, cursor) = xml_lit(">").parse(cursor)?;
 
         Ok((
-            DocTypeDecl::new(name.to_string(), external_id, Some(IntSubset::new(vec![]))),
+            DocTypeDecl::new(
+                name.to_string(),
+                external_id,
+                raw_internal.map(|subset| subset.1),
+            ),
             cursor,
         ))
     }
 }
 
-/// DeclSep ::= PEReference | S
-/*pub struct DeclSepToken;
-
-impl<'a> Parser<'a> for DeclSepToken {
-    type Attribute = DocTypeDecl<'a>;
-    type Error = XmlError;
-
-    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        todo!()
-        // if let Ok((_, cursor)) = PeReferenceToken.parse(cursor) {
-        //     return Ok((DtdTypeDecl::new(name), cursor));
-        // } else if let Ok((_, cursor)) = SToken.parse(cursor) {
-        //     return Ok((DtdTypeDecl::new(name), cursor));
-        // } else {
-        //     return Err(XmlError::ExpectToken("DeclSep"));
-        // }
-    }
-}
-*/
-// intSubset ::= (markupdecl | DeclSep)*
-// https://www.w3.org/TR/REC-xml/#NT-intSubset
-
+/// Internal Subset
+///
+///     intSubset ::= (markupdecl | DeclSep)*
 pub struct IntSubsetToken;
 
 impl<'a> Parser<'a> for IntSubsetToken {
@@ -136,24 +122,36 @@ impl<'a> Parser<'a> for IntSubsetToken {
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
         kleene(MarkupDeclToken)
             .parse(cursor)
-            .map(|(decls, cursor)| (IntSubset::new(decls), cursor))
+            .map(|(decls, cursor)| {
+                (
+                    IntSubset::new(decls.into_iter().filter_map(|decl| decl).collect()),
+                    cursor,
+                )
+            })
     }
 }
 
 /// Parser for Markup Declaration or Declaration Seperator
 ///
-/// markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
-/// DeclSep ::= PEReference | S
+///     markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
+///     DeclSep ::= PEReference | S
+///
 pub struct MarkupDeclToken;
 
 impl<'a> Parser<'a> for MarkupDeclToken {
-    type Attribute = MarkupDeclEntry;
+    type Attribute = Option<MarkupDeclEntry>;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        let (_, cursor) = optional(SToken).parse(cursor)?;
+        if let Ok((_, cursor)) = SToken.parse(cursor) {
+            Ok((None, cursor))
+        } else if let Ok((element, cursor)) = ElementDeclToken.parse(cursor) {
+            Ok((Some(MarkupDeclEntry::Element(element)), cursor))
+        } else {
+            // TODO
+            Err(XmlError::UnexpectedDtdEntry)
+        }
 
-        todo!()
         // return if let Ok((pe_ref, cursor)) = PeReferenceToken.parse(cursor) {
         //     Ok((MarkupDeclEntry::PEReference(pe_ref), cursor))
         // } else if let Ok((element, cursor)) = ElementDeclToken.parse(cursor) {
@@ -176,8 +174,53 @@ impl<'a> Parser<'a> for MarkupDeclToken {
 
 // 3.2 Element Type Declarations
 
-// elementdecl	   ::=   	'<!ELEMENT' S Name S contentspec S? '>'
-// contentspec	   ::=   	'EMPTY' | 'ANY' | Mixed | children
+/// Element Type Declaration
+///
+///     elementdecl	   ::=   	'<!ELEMENT' S Name S contentspec S? '>'
+///
+pub struct ElementDeclToken;
+
+impl<'a> Parser<'a> for ElementDeclToken {
+    type Attribute = Element;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = xml_lit("<!ELEMENT").parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (name, cursor) = NameToken.parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (content_spec, cursor) = ContentSpecToken.parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (_, cursor) = xml_lit(">").parse(cursor)?;
+
+        let element = Element {
+            name: name.to_string(),
+            content_spec,
+        };
+        Ok((element, cursor))
+    }
+}
+
+/// Content Spec
+///
+///     contentspec	   ::=   	'EMPTY' | 'ANY' | Mixed | children
+///
+pub struct ContentSpecToken;
+
+impl<'a> Parser<'a> for ContentSpecToken {
+    type Attribute = ContentSpec;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Ok((_, cursor)) = xml_lit("EMPTY").parse(cursor) {
+            Ok((ContentSpec::Empty, cursor))
+        } else if let Ok((_, cursor)) = xml_lit("ANY").parse(cursor) {
+            Ok((ContentSpec::Any, cursor))
+        } else {
+            todo!()
+        }
+    }
+}
 
 // examples
 // <!ELEMENT br EMPTY>
@@ -362,6 +405,213 @@ mod tests {
         fn fail_missing_system_id() {
             let result = DocTypeDeclToken.parse(Cursor::new("<!DOCTYPE e PUBLIC 'public'>"));
             assert!(result.is_err()); // TODO
+        }
+    }
+
+    /// 3.2 Element Type Declarations
+    mod element {
+        use crate::dtd::{
+            ContentParticle, ContentParticleEntry, ContentSpec, Element, ExternalId, IntSubset,
+            MarkupDeclEntry, Repetition,
+        };
+        use crate::parser::Parser;
+        use crate::reader::dtd::DocTypeDeclToken;
+        use crate::{Cursor, XmlError};
+
+        #[test]
+        fn empty() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE e [ <!ELEMENT br EMPTY> ]>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "br".to_string(),
+                    ContentSpec::Empty
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn any() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new("<!DOCTYPE e [ <!ELEMENT container ANY> ]>"))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "container".to_string(),
+                    ContentSpec::Any
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn mixed_data_1() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE greeting [ <!ELEMENT greeting (#PCDATA)> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "greeting".to_string(),
+                    ContentSpec::PCData
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn mixed_data_2() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ELEMENT p (#PCDATA|emph)* > ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "greeting".to_string(),
+                    ContentSpec::Mixed(vec!["emph".to_string()])
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn mixed_data_3() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ELEMENT p (#PCDATA|a|ul|b|i|em)*> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "p".to_string(),
+                    ContentSpec::Mixed(vec![
+                        "a".to_string(),
+                        "ul".to_string(),
+                        "b".to_string(),
+                        "i".to_string(),
+                        "em".to_string()
+                    ])
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        #[ignore]
+        fn mixed_data_4() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ELEMENT p (#PCDATA | %font; | %phrase; | %special; | %form;)* > ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "p".to_string(),
+                    ContentSpec::Mixed(vec![])
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn element_content_1() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ELEMENT spec (front, body, back?)> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "b".to_string(),
+                    ContentSpec::Children(ContentParticle {
+                        entry: ContentParticleEntry::Seq(vec![
+                            ContentParticle {
+                                entry: ContentParticleEntry::Name("front".to_string()),
+                                repetition: Repetition::Once
+                            },
+                            ContentParticle {
+                                entry: ContentParticleEntry::Name("body".to_string()),
+                                repetition: Repetition::Once
+                            },
+                            ContentParticle {
+                                entry: ContentParticleEntry::Name("back".to_string()),
+                                repetition: Repetition::ZeroOrOne
+                            }
+                        ]),
+                        repetition: Repetition::Once
+                    })
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn element_content_2() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ELEMENT div1 (head, (p | list | note)*, div2*)> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
+                    "div1".to_string(),
+                    ContentSpec::Children(ContentParticle {
+                        entry: ContentParticleEntry::Seq(vec![
+                            ContentParticle {
+                                entry: ContentParticleEntry::Name("head".to_string()),
+                                repetition: Repetition::Once
+                            },
+                            ContentParticle {
+                                entry: ContentParticleEntry::Choice(vec![
+                                    ContentParticle {
+                                        entry: ContentParticleEntry::Name("p".to_string()),
+                                        repetition: Repetition::Once
+                                    },
+                                    ContentParticle {
+                                        entry: ContentParticleEntry::Name("list".to_string()),
+                                        repetition: Repetition::Once
+                                    },
+                                    ContentParticle {
+                                        entry: ContentParticleEntry::Name("note".to_string()),
+                                        repetition: Repetition::Once
+                                    }
+                                ]),
+                                repetition: Repetition::ZeroOrMore
+                            },
+                            ContentParticle {
+                                entry: ContentParticleEntry::Name("div2".to_string()),
+                                repetition: Repetition::ZeroOrMore
+                            }
+                        ]),
+                        repetition: Repetition::Once
+                    })
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        #[ignore]
+        fn element_content_3() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ELEMENT dictionary-body (%div.mix; | %dict.mix;)*> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(&Some(IntSubset::new(vec![])), dtd.internal_subset());
         }
     }
 }

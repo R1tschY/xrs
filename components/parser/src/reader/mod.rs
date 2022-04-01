@@ -86,7 +86,9 @@ impl<'a, T: Fn(char) -> bool> Parser<'a> for CharTerminated<T> {
 // 2.3 Common Syntactic Constructs
 
 /// White Space
-/// S ::= (#x20 | #x9 | #xD | #xA)+
+///
+///     S ::= (#x20 | #x9 | #xD | #xA)+
+///
 struct SToken;
 
 impl<'a> Parser<'a> for SToken {

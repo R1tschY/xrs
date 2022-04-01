@@ -28,7 +28,7 @@ impl DocTypeDecl {
     pub fn external_id(&self) -> Option<ExternalId> {
         self.external_id.clone()
     }
-    pub fn int_subset(&self) -> &Option<IntSubset> {
+    pub fn internal_subset(&self) -> &Option<IntSubset> {
         &self.int_subset
     }
 }
@@ -56,14 +56,62 @@ impl IntSubset {
     }
 }
 
+/// Element Type Declaration
+///
+/// Section 3.2
+#[derive(Clone, Debug, PartialEq)]
+pub struct Element {
+    pub name: String,
+    pub content_spec: ContentSpec,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ContentSpec {
+    Empty,
+    Any,
+    Mixed(Vec<String>),
+    PCData,
+    Children(ContentParticle),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContentParticle {
+    pub entry: ContentParticleEntry,
+    pub repetition: Repetition,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ContentParticleEntry {
+    Name(String),
+    Choice(Vec<ContentParticle>),
+    Seq(Vec<ContentParticle>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Repetition {
+    Once,
+    ZeroOrMore,
+    OneOrMore,
+    ZeroOrOne,
+}
+
 /// Entry of Markup Declaration
 #[derive(Clone, Debug, PartialEq)]
 pub enum MarkupDeclEntry {
-    Element(String),
+    Element(Element),
     AttList(String),
     Entity(String),
     Notation(String),
     PI(PI<'static>),
     Comment(String),
     PEReference(String),
+}
+
+impl MarkupDeclEntry {
+    pub fn new_element(name: String, content: ContentSpec) -> Self {
+        Self::Element(Element {
+            name,
+            content_spec: content,
+        })
+    }
 }
