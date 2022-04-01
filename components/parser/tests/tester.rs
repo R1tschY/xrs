@@ -7,6 +7,23 @@ use xml_xts::TestableParser;
 pub struct ReaderIT;
 
 impl ReaderIT {
+    fn process_cdata(cdata: &str) -> String {
+        let mut result = String::with_capacity(cdata.len());
+        for c in cdata.chars() {
+            match c {
+                '\n' => result.push_str("&#10;"),
+                '\t' => result.push_str("&#9;"),
+                '\r' => result.push_str("&#13;"),
+                '&' => result.push_str("&amp;"),
+                '<' => result.push_str("&lt;"),
+                '>' => result.push_str("&gt;"),
+                '"' => result.push_str("&quot;"),
+                _ => result.push(c),
+            }
+        }
+        result
+    }
+
     fn canonxml_internal(&self, input: &str) -> Result<String, XmlError> {
         let mut reader = Reader::new(input);
         let mut result = String::new();
@@ -23,7 +40,7 @@ impl ReaderIT {
                     self.write_etag(&mut result, etag)?;
                 }
                 XmlEvent::Characters(chars) => {
-                    result.push_str(chars.as_ref());
+                    result.push_str(&Self::process_cdata(chars.as_ref()));
                 }
                 XmlEvent::PI(pi) => {
                     self.write_pi(&mut result, pi)?;
@@ -84,7 +101,7 @@ impl TestableParser for ReaderIT {
                     return true;
                 }
                 Err(err) => {
-                    println!("      ERROR: {:?}", err);
+                    println!("ERROR: {:?}", err);
                     return false;
                 }
             }
