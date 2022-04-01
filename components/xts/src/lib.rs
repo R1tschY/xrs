@@ -72,7 +72,7 @@ pub struct Test {
     pub namespace: YesNo,
 
     #[serde(rename = "$value")]
-    pub description: Vec<String>,
+    pub description: Vec<String>, // TODO: that should not be a Vec
 }
 
 #[derive(Deserialize, Serialize, Debug, Hash, Eq, PartialEq, Copy, Clone)]
@@ -263,20 +263,29 @@ impl XmlTester {
 
     pub fn execute_test(parser: &dyn TestableParser, test: &Test, base: &Path) {
         let path = base.join(&test.uri);
-        let content = fs::read(path).unwrap();
+        let content = fs::read(&path).unwrap();
         match test.ty {
             Type::Valid => assert!(
                 parser.is_wf(&content, test.namespace.into()),
-                "should be well-formed"
+                "{}:0:0: should be well-formed ({} / {})",
+                path.display(),
+                &test.description[0],
+                &test.sections
             ),
             Type::Invalid => assert!(
                 parser.is_wf(&content, test.namespace.into()),
-                "should be well-formed"
+                "{}:0:0: should be well-formed ({} / {})",
+                path.display(),
+                &test.description[0],
+                &test.sections
             ),
             Type::Error => return,
             Type::NotWf => assert!(
                 !parser.is_wf(&content, test.namespace.into()),
-                "should not be well-formed"
+                "{}:0:0: should not be well-formed ({} / {})",
+                path.display(),
+                &test.description[0],
+                &test.sections
             ),
         };
 
@@ -285,7 +294,12 @@ impl XmlTester {
                 Ok(out) => {
                     let out_path = base.join(&output);
                     let out_content = fs::read(out_path).unwrap();
-                    assert_eq!(out, std::str::from_utf8(&out_content).unwrap());
+                    assert_eq!(
+                        out,
+                        std::str::from_utf8(&out_content).unwrap(),
+                        "{}:0:0",
+                        path.display()
+                    );
                 }
                 Err(err) => {
                     panic!("{:?}", err)
