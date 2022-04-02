@@ -66,10 +66,12 @@ impl<'a> NsReader<'a> {
         }
     }
 
+    #[inline]
     pub fn attributes(&self) -> &[NsAttribute<'a>] {
         &self.attributes
     }
 
+    #[inline]
     pub fn resolve_namespace(&self, prefix: Option<&str>) -> Option<&str> {
         if let Some(prefix) = prefix {
             self.namespaces.resolve(prefix)
@@ -78,24 +80,26 @@ impl<'a> NsReader<'a> {
         }
     }
 
-    pub fn resolve_element_namespace(&self, qname: &QName) -> Result<Option<&str>, ()> {
+    #[inline]
+    pub fn resolve_element_namespace(&self, qname: &QName) -> Result<Option<&str>, XmlError> {
         let prefix = qname.prefix.as_ref().map(|prefix| &prefix as &str);
         if let Some(prefix) = prefix {
             match self.namespaces.resolve(prefix) {
                 Some(ns) => Ok(Some(ns)),
-                None => Err(()),
+                None => Err(XmlError::UnknownNamespacePrefix(prefix.to_string())),
             }
         } else {
             Ok(self.namespaces.resolve_default())
         }
     }
 
-    pub fn resolve_attribute_namespace(&self, qname: &QName) -> Result<Option<&str>, ()> {
+    #[inline]
+    pub fn resolve_attribute_namespace(&self, qname: &QName) -> Result<Option<&str>, XmlError> {
         let prefix = qname.prefix.as_ref().map(|prefix| &prefix as &str);
         if let Some(prefix) = prefix {
             match self.namespaces.resolve(prefix) {
                 Some(ns) => Ok(Some(ns)),
-                None => Err(()),
+                None => Err(XmlError::UnknownNamespacePrefix(prefix.to_string())),
             }
         } else {
             Ok(None)

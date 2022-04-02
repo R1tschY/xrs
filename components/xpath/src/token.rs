@@ -107,8 +107,8 @@ impl fmt::Debug for Ident {
 
 #[derive(Clone)]
 pub struct Literal {
-    value: String,
-    span: Span,
+    pub value: String,
+    pub span: Span,
 }
 
 impl fmt::Display for Literal {
@@ -125,8 +125,8 @@ impl fmt::Debug for Literal {
 
 #[derive(Clone)]
 pub struct Number {
-    value: f64,
-    span: Span,
+    pub value: f64,
+    pub span: Span,
 }
 
 impl fmt::Display for Number {

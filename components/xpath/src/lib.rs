@@ -2,15 +2,19 @@
 
 use std::borrow::Cow;
 
-use xml_dom::error::Error as DomError;
 use xml_dom::error::Result as DomResult;
 use xml_dom::{Document, Element};
+
+use crate::ast::Expr;
 
 mod ast;
 mod token;
 
-mod selectors;
-mod types;
+pub(crate) mod datamodel;
+pub(crate) mod dom;
+pub(crate) mod select;
+
+mod functions;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Span {
@@ -58,18 +62,14 @@ struct LocationStep {
     predicates: Vec<Predicate>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum XPathError {
-    Dom(DomError),
-}
-
-impl From<DomError> for XPathError {
-    fn from(value: DomError) -> Self {
-        Self::Dom(value)
-    }
+    WrongFunctionArgument(String),
+    CallToUndefinedFunction(String),
 }
 
 struct XPath {
-    steps: Vec<LocationStep>,
+    expr: Expr,
 }
 
 pub(crate) trait XPathDomExt {

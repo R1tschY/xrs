@@ -153,7 +153,7 @@ pub trait Parse: Sized {
 
 #[allow(dead_code)]
 pub struct Ast {
-    expr: Expr,
+    pub expr: Expr,
 }
 
 #[allow(dead_code)]
@@ -222,9 +222,9 @@ pub enum BinOp {
 
 #[derive(Debug)]
 pub struct ExprBinary {
-    left: Box<Expr>,
-    op: BinOp,
-    right: Box<Expr>,
+    pub left: Box<Expr>,
+    pub op: BinOp,
+    pub right: Box<Expr>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -234,8 +234,8 @@ pub enum UnaryOp {
 
 #[derive(Debug)]
 pub struct ExprUnary {
-    op: UnaryOp,
-    right: Box<Expr>,
+    pub op: UnaryOp,
+    pub right: Box<Expr>,
 }
 
 #[derive(Debug)]

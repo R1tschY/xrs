@@ -278,6 +278,7 @@ pub enum XmlError {
     InvalidPITarget,
     UnexpectedCharacter(char),
     CommentColonColon,
+    UnknownNamespacePrefix(String),
 }
 
 /// Fatal DTD parsing error

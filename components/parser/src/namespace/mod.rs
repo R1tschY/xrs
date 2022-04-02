@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::str::{from_utf8, FromStr, ParseBoolError};
 use std::sync::Arc;
 
@@ -80,6 +81,26 @@ impl<'a> QName<'a> {
             Err(XmlError::IllegalName {
                 name: String::new(),
             })
+        }
+    }
+}
+
+impl<'a> Display for QName<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(prefix) = &self.prefix {
+            f.write_fmt(format_args!("{}:{}", prefix, &self.local_part))
+        } else {
+            f.write_str(&self.local_part)
+        }
+    }
+}
+
+impl<'a> From<QName<'a>> for String {
+    fn from(qname: QName<'a>) -> Self {
+        if let Some(prefix) = &qname.prefix {
+            format!("{}:{}", prefix, qname.local_part)
+        } else {
+            qname.local_part.into_owned()
         }
     }
 }

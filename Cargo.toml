@@ -7,3 +7,7 @@ members = [
     "components/xpath",
     "components/chars",
 ]
+
+[profile.release]
+lto = true
+codegen-units = 1

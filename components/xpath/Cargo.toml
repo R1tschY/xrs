@@ -8,3 +8,4 @@ edition = "2018"
 [dependencies]
 xml-dom = { path = "../dom" }
 xml-chars = { path = "../chars" }
+xml-parser = { path = "../parser" }
