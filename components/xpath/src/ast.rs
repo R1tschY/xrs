@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::fmt::{Display, Formatter, Write};
+
 use crate::token::{Ident, Literal, Number, Punct, Token, Tokens};
 
 macro_rules! token {
@@ -139,24 +141,21 @@ impl<'a> Cursor<'a> {
     }
 }
 
-#[allow(dead_code)]
 pub struct ParseBuffer<'a> {
     cur: Cursor<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ParseError;
 
 pub trait Parse: Sized {
     fn parse(cur: &mut ParseBuffer) -> Result<Self, ParseError>;
 }
 
-#[allow(dead_code)]
 pub struct Ast {
     pub expr: Expr,
 }
 
-#[allow(dead_code)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
 enum Precedence {
     Or,
@@ -170,7 +169,6 @@ enum Precedence {
     Path,
 }
 
-#[allow(dead_code)]
 impl Precedence {
     pub fn of(op: Operator) -> Self {
         match op {
@@ -220,6 +218,28 @@ pub enum BinOp {
     RecursivePath,
 }
 
+impl Display for BinOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            BinOp::Or => "or",
+            BinOp::And => "and",
+            BinOp::Equal => "=",
+            BinOp::NotEqual => "!=",
+            BinOp::Less => "<",
+            BinOp::Greater => ">",
+            BinOp::LessEqual => "<=",
+            BinOp::GreaterEqual => ">=",
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Multiply => "*",
+            BinOp::Divide => "div",
+            BinOp::Modulo => "mod",
+            BinOp::Path => "/",
+            BinOp::RecursivePath => "//",
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct ExprBinary {
     pub left: Box<Expr>,
@@ -227,15 +247,35 @@ pub struct ExprBinary {
     pub right: Box<Expr>,
 }
 
+impl Display for ExprBinary {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("({} {} {})", self.left, self.op, self.right))
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum UnaryOp {
     Negative,
+}
+
+impl Display for UnaryOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            UnaryOp::Negative => "-",
+        })
+    }
 }
 
 #[derive(Debug)]
 pub struct ExprUnary {
     pub op: UnaryOp,
     pub right: Box<Expr>,
+}
+
+impl Display for ExprUnary {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}{}", self.op, self.right))
+    }
 }
 
 #[derive(Debug)]
@@ -247,6 +287,18 @@ pub enum Expr {
     Number(Number),
 }
 
+impl Display for Expr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expr::Binary(expr) => Display::fmt(expr, f),
+            Expr::Unary(expr) => Display::fmt(expr, f),
+            Expr::Ident(ident) => Display::fmt(ident, f),
+            Expr::Literal(lit) => Display::fmt(lit, f),
+            Expr::Number(num) => Display::fmt(num, f),
+        }
+    }
+}
+
 /// only internal
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum Operator {
@@ -255,16 +307,16 @@ enum Operator {
     Sentinel,
 }
 
-/// a shunting yard parser
+/// a recursive shunting yard parser
 ///
 /// see https://www.engr.mun.ca/~theo/Misc/exp_parsing.htm
-struct ShuntingYardParser<'a> {
+struct RecursiveShuntingYardParser<'a> {
     cur: Cursor<'a>,
     operands: Vec<Expr>,
     operators: Vec<Operator>,
 }
 
-impl<'a> ShuntingYardParser<'a> {
+impl<'a> RecursiveShuntingYardParser<'a> {
     fn new(cur: Cursor<'a>) -> Self {
         Self {
             cur,
@@ -517,57 +569,59 @@ def_keywords! {
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
-
     use super::*;
 
-    #[test]
-    fn op_precedence() {
-        let tokens: Tokens = "x*y+z".parse().unwrap();
-        let parser = ShuntingYardParser::new(Cursor::new(&tokens));
+    fn parse(input: &str) -> Result<String, ParseError> {
+        let tokens: Tokens = input.parse().unwrap();
+        let parser = RecursiveShuntingYardParser::new(Cursor::new(&tokens));
+        parser.parse().map(|ast| ast.to_string())
+    }
 
-        assert_matches!(
-            parser.parse(),
-            Ok(Expr::Binary(ExprBinary {
-                left: x_y,
-                op: BinOp::Add,
-                right: z
-            })) => {
-                assert_matches!(*x_y, Expr::Binary(ExprBinary {
-                    left: x,
-                    op: BinOp::Multiply,
-                    right: y
-                }) => {
-                    assert_matches!(*x, Expr::Ident(ident) if ident.as_str() == "x");
-                    assert_matches!(*y, Expr::Ident(ident) if ident.as_str() == "y");
-                });
-                assert_matches!(*z, Expr::Ident(ident) if ident.as_str() == "z");
-            }
+    #[test]
+    fn op_precedence_1() {
+        assert_eq!(Ok("((x * y) + z)".to_string()), parse("x*y+z"),);
+    }
+
+    #[test]
+    fn op_precedence_2() {
+        assert_eq!(
+            Ok("((a + ((b * c) * d)) + e)".to_string()),
+            parse("a + b * c * d + e"),
         );
     }
 
     #[test]
-    fn parenthesis() {
-        let tokens: Tokens = "x*(y+z)".parse().unwrap();
-        let parser = ShuntingYardParser::new(Cursor::new(&tokens));
+    fn parenthesis_1() {
+        assert_eq!(Ok("(x * (y + z))".to_string()), parse("x*(y+z)"),);
+    }
 
-        assert_matches!(
-            parser.parse(),
-            Ok(Expr::Binary(ExprBinary {
-                left: x,
-                op: BinOp::Multiply,
-                right: y_z
-            })) => {
-                assert_matches!(*x, Expr::Ident(ident) if ident.as_str() == "x");
-                assert_matches!(*y_z, Expr::Binary(ExprBinary {
-                    left: y,
-                    op: BinOp::Add,
-                    right: z
-                }) => {
-                    assert_matches!(*y, Expr::Ident(ident) if ident.as_str() == "y");
-                    assert_matches!(*z, Expr::Ident(ident) if ident.as_str() == "z");
-                });
-            }
-        );
+    #[test]
+    fn parenthesis_2() {
+        assert_eq!(Ok("1".to_string()), parse("((((1))))"),);
+    }
+
+    #[test]
+    fn unary_1() {
+        assert_eq!(Ok("-1".to_string()), parse("-1"),);
+    }
+
+    #[test]
+    fn unary_2() {
+        assert_eq!(Ok("(-1 + 1)".to_string()), parse("-1 + 1"),);
+    }
+
+    #[test]
+    fn unary_3() {
+        assert_eq!(Ok("-(1 + 1)".to_string()), parse("-(1 + 1)"),);
+    }
+
+    #[test]
+    fn unary_4() {
+        assert_eq!(Ok("---1".to_string()), parse("-(-(-1))"),);
+    }
+
+    #[test]
+    fn number() {
+        assert_eq!(Ok("1".to_string()), parse("1"),);
     }
 }
