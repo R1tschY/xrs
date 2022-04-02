@@ -83,7 +83,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn next(&self) -> Option<&Token> {
+    pub fn next(&self) -> Option<&'a Token> {
         self.rest.get(0)
     }
 
@@ -201,7 +201,7 @@ impl Precedence {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum BinOp {
     Or,
     And,
@@ -227,7 +227,7 @@ pub struct ExprBinary {
     pub right: Box<Expr>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum UnaryOp {
     Negative,
 }
@@ -248,7 +248,7 @@ pub enum Expr {
 }
 
 /// only internal
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 enum Operator {
     Binary(BinOp),
     Unary(UnaryOp),
@@ -297,8 +297,7 @@ impl<'a> ShuntingYardParser<'a> {
     }
 
     fn p(&mut self) {
-        let next = self.cur.next();
-        if let Some(next) = next {
+        if let Some(next) = self.cur.next() {
             match next {
                 Token::Ident(ident) => {
                     self.operands.push(Expr::Ident(ident.clone()));
@@ -316,7 +315,7 @@ impl<'a> ShuntingYardParser<'a> {
                     self.cur = self.cur.consume_first();
                     self.operators.push(Operator::Sentinel);
                     self.e();
-                    self.cur.expect::<CloseParenthesisToken>();
+                    self.cur = self.cur.expect::<CloseParenthesisToken>();
                     self.operators.pop();
                 }
                 _ => {
@@ -518,12 +517,57 @@ def_keywords! {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+
     use super::*;
 
     #[test]
-    fn test() {
+    fn op_precedence() {
         let tokens: Tokens = "x*y+z".parse().unwrap();
         let parser = ShuntingYardParser::new(Cursor::new(&tokens));
-        println!("{:#?}", parser.parse().unwrap());
+
+        assert_matches!(
+            parser.parse(),
+            Ok(Expr::Binary(ExprBinary {
+                left: x_y,
+                op: BinOp::Add,
+                right: z
+            })) => {
+                assert_matches!(*x_y, Expr::Binary(ExprBinary {
+                    left: x,
+                    op: BinOp::Multiply,
+                    right: y
+                }) => {
+                    assert_matches!(*x, Expr::Ident(ident) if ident.as_str() == "x");
+                    assert_matches!(*y, Expr::Ident(ident) if ident.as_str() == "y");
+                });
+                assert_matches!(*z, Expr::Ident(ident) if ident.as_str() == "z");
+            }
+        );
+    }
+
+    #[test]
+    fn parenthesis() {
+        let tokens: Tokens = "x*(y+z)".parse().unwrap();
+        let parser = ShuntingYardParser::new(Cursor::new(&tokens));
+
+        assert_matches!(
+            parser.parse(),
+            Ok(Expr::Binary(ExprBinary {
+                left: x,
+                op: BinOp::Multiply,
+                right: y_z
+            })) => {
+                assert_matches!(*x, Expr::Ident(ident) if ident.as_str() == "x");
+                assert_matches!(*y_z, Expr::Binary(ExprBinary {
+                    left: y,
+                    op: BinOp::Add,
+                    right: z
+                }) => {
+                    assert_matches!(*y, Expr::Ident(ident) if ident.as_str() == "y");
+                    assert_matches!(*z, Expr::Ident(ident) if ident.as_str() == "z");
+                });
+            }
+        );
     }
 }

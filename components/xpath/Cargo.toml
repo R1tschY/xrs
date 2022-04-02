@@ -9,3 +9,6 @@ edition = "2018"
 xml-dom = { path = "../dom" }
 xml-chars = { path = "../chars" }
 xml-parser = { path = "../parser" }
+
+[dev-dependencies]
+assert_matches = "1.5"
