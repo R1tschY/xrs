@@ -1,250 +1,13 @@
-#![allow(dead_code)]
-
-use std::fmt;
-use std::fmt::Debug;
-use std::str::{Bytes, Chars, FromStr};
+use std::str::FromStr;
 
 use xml_chars::{XmlAsciiChar, XmlChar};
 
-use crate::Span;
+use crate::lex::token::{Token, Tokens};
+use crate::lex::{Ident, LexError, Literal, Number, Punct, Spacing};
 
-#[derive(Debug)]
-pub struct LexError {
-    span: Span,
-}
+use super::lex_cursor::LexCursor;
 
 struct Reject;
-
-#[derive(Copy, Clone, Debug)]
-struct LexCursor<'a> {
-    rest: &'a str,
-    offset: usize,
-}
-
-impl<'a> LexCursor<'a> {
-    fn for_str(input: &'a str) -> Self {
-        Self {
-            rest: input,
-            offset: 0,
-        }
-    }
-
-    fn advance(&self, bytes: usize) -> Self {
-        let (_, rest) = self.rest.split_at(bytes);
-        Self {
-            rest,
-            offset: self.offset + bytes,
-        }
-    }
-
-    fn advance_to(&self, bytes: usize) -> (&'a str, Self) {
-        let (skip, rest) = self.rest.split_at(bytes);
-        (
-            skip,
-            Self {
-                rest,
-                offset: self.offset + bytes,
-            },
-        )
-    }
-
-    fn starts_with(&self, prefix: &str) -> bool {
-        self.rest.starts_with(prefix)
-    }
-
-    fn next_byte(&self) -> Option<u8> {
-        self.rest.bytes().next()
-    }
-
-    fn next_char(&self) -> Option<char> {
-        self.rest.chars().next()
-    }
-
-    fn eof(&self) -> bool {
-        self.rest.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.rest.len()
-    }
-
-    fn bytes(&self) -> Bytes<'a> {
-        self.rest.bytes()
-    }
-
-    fn as_bytes(&self) -> &'a [u8] {
-        self.rest.as_bytes()
-    }
-
-    fn chars(&self) -> Chars<'a> {
-        self.rest.chars()
-    }
-}
-
-#[derive(Clone)]
-pub struct Ident {
-    sym: String,
-    span: Span,
-}
-
-impl Ident {
-    pub fn as_str(&self) -> &str {
-        &self.sym
-    }
-}
-
-impl fmt::Display for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.sym)
-    }
-}
-
-impl fmt::Debug for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Ident").field(&self.sym).finish()
-    }
-}
-
-#[derive(Clone)]
-pub struct Literal {
-    pub value: String,
-    pub span: Span,
-}
-
-impl fmt::Display for Literal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.value, f)
-    }
-}
-
-impl fmt::Debug for Literal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Literal").field(&self.value).finish()
-    }
-}
-
-#[derive(Clone)]
-pub struct Number {
-    pub value: f64,
-    pub span: Span,
-}
-
-impl fmt::Display for Number {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl fmt::Debug for Number {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Number").field(&self.value).finish()
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Spacing {
-    Joined,
-    Alone,
-}
-
-#[derive(Clone)]
-pub struct Punct {
-    pub ch: char,
-    pub spacing: Spacing,
-    pub span: Span,
-}
-
-impl fmt::Debug for Punct {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Punct")
-            .field(&self.ch)
-            .field(&self.spacing)
-            .finish()
-    }
-}
-
-impl Punct {
-    pub fn new(c: char, spacing: Spacing, span: Span) -> Self {
-        Self {
-            ch: c,
-            spacing,
-            span,
-        }
-    }
-
-    pub fn as_char(&self) -> char {
-        self.ch
-    }
-
-    pub fn spacing(&self) -> Spacing {
-        self.spacing
-    }
-}
-
-impl fmt::Display for Punct {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.ch, f)
-    }
-}
-
-#[derive(Clone)]
-pub enum Token {
-    Ident(Ident),
-    Literal(Literal),
-    Number(Number),
-    Punct(Punct),
-}
-
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Token::Ident(ident) => fmt::Display::fmt(ident, f),
-            Token::Literal(literal) => fmt::Display::fmt(literal, f),
-            Token::Number(number) => fmt::Display::fmt(number, f),
-            Token::Punct(punct) => fmt::Display::fmt(punct, f),
-        }
-    }
-}
-
-impl fmt::Debug for Token {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Token::Ident(ident) => fmt::Debug::fmt(ident, f),
-            Token::Literal(literal) => fmt::Debug::fmt(literal, f),
-            Token::Number(number) => fmt::Debug::fmt(number, f),
-            Token::Punct(punct) => fmt::Debug::fmt(punct, f),
-        }
-    }
-}
-
-pub struct Tokens {
-    tokens: Vec<Token>,
-}
-
-impl IntoIterator for Tokens {
-    type Item = Token;
-    type IntoIter = std::vec::IntoIter<Token>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.tokens.into_iter()
-    }
-}
-
-impl Tokens {
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
-
-    pub fn as_slice(&self) -> &[Token] {
-        self.tokens.as_slice()
-    }
-}
-
-impl fmt::Debug for Tokens {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Tokens").field(&self.tokens).finish()
-    }
-}
 
 impl FromStr for Tokens {
     type Err = LexError;
@@ -279,7 +42,7 @@ fn lex_expr(mut input: LexCursor) -> Result<Tokens, LexError> {
         }
     }
 
-    Ok(Tokens { tokens })
+    Ok(Tokens::new(tokens))
 }
 
 fn skip_whitespace<'a>(input: &LexCursor<'a>) -> LexCursor<'a> {
@@ -303,14 +66,7 @@ fn lex_punct<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Punct), Reject
             } else {
                 Spacing::Alone
             };
-            return Ok((
-                cursor,
-                Punct::new(
-                    ch as char,
-                    spacing,
-                    Span::new(input.offset, input.offset + 1),
-                ),
-            ));
+            return Ok((cursor, Punct::new(ch as char, spacing, input.span(1))));
         }
     }
 
@@ -337,13 +93,7 @@ fn lex_ncname<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Ident), Rejec
     }
 
     let len = buffer.as_bytes().len();
-    Ok((
-        input.advance(len),
-        Ident {
-            sym: buffer,
-            span: Span::new(input.offset, input.offset + len),
-        },
-    ))
+    Ok((input.advance(len), Ident::new(buffer, input.span(len))))
 }
 
 fn lex_literal<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Literal), Reject> {
@@ -360,7 +110,7 @@ fn lex_literal<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Literal), Re
         input.advance(len),
         Literal {
             value: literal,
-            span: Span::new(input.offset, input.offset + len),
+            span: input.span(len),
         },
     ))
 }
@@ -410,23 +160,22 @@ fn lex_number<'a>(input: &LexCursor<'a>) -> Result<(LexCursor<'a>, Number), Reje
         cursor,
         Number {
             value,
-            span: Span::new(input.offset, input.offset + len),
+            span: input.span(len),
         },
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::token::{lex_expr, LexCursor, Tokens};
+    use crate::lex::lex_cursor::LexCursor;
+    use crate::lex::Tokens;
+
+    use super::*;
 
     #[test]
     fn it_works() {
         let test = "array:append([],\"3\",.0,1.0)";
-        let tokens = lex_expr(LexCursor {
-            rest: test,
-            offset: 0,
-        })
-        .unwrap();
+        let tokens = lex_expr(LexCursor::for_str(test)).unwrap();
         println!("{:?}", tokens);
     }
 

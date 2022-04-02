@@ -1,7 +1,7 @@
-use crate::ast::{BinOp, ExprBinary};
-use crate::datamodel::{Context, Object};
-use crate::functions::boolean;
-use crate::{Expr, XPath, XPathError};
+use crate::context::Context;
+use crate::object::Object;
+use crate::parser::{BinOp, Expr, ExprBinary};
+use crate::{XPath, XPathError};
 
 pub trait Selector {
     fn select<'i, 't>(&self, ctx: &Context<'i, 't>) -> Result<Object<'i, 't>, XPathError>;
@@ -29,10 +29,10 @@ impl Selector for ExprBinary {
     fn select<'i, 't>(&self, ctx: &Context<'i, 't>) -> Result<Object<'i, 't>, XPathError> {
         match self.op {
             BinOp::Or => Ok(Object::Boolean(
-                boolean(&self.left.select(ctx)?) || boolean(&self.right.select(ctx)?),
+                bool::from(self.left.select(ctx)?) || bool::from(self.right.select(ctx)?),
             )),
             BinOp::And => Ok(Object::Boolean(
-                boolean(&self.left.select(ctx)?) && boolean(&self.right.select(ctx)?),
+                bool::from(self.left.select(ctx)?) && bool::from(self.right.select(ctx)?),
             )),
             BinOp::Equal => todo!(),
             BinOp::NotEqual => todo!(),

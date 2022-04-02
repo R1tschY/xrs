@@ -1,27 +1,7 @@
-use std::borrow::Cow;
-
 use xml_parser::{NsReader, XmlError, XmlNsEvent};
 
-use crate::datamodel::{AttributeNode, Child, PINode};
-use crate::datamodel::{ElementNode, RootNode};
-
-trait CowStrHelpers {
-    fn push_str(&mut self, string: &str);
-}
-
-impl<'a> CowStrHelpers for Cow<'a, str> {
-    fn push_str(&mut self, string: &str) {
-        match self {
-            Cow::Borrowed(borrowed) => {
-                let mut res = String::with_capacity(borrowed.len() + string.len());
-                res.push_str(borrowed);
-                res.push_str(&string);
-                *self = Cow::Owned(res);
-            }
-            Cow::Owned(owned) => owned.push_str(&string),
-        }
-    }
-}
+use crate::datamodel::{AttributeNode, Child, ElementNode, PINode, RootNode};
+use crate::utils::CowStrHelpers;
 
 pub struct DomBuilder {}
 
@@ -102,7 +82,7 @@ impl DomBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::datamodel::parser::DomBuilder;
 
     #[test]
     fn test() {
