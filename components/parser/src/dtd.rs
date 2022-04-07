@@ -89,7 +89,7 @@ pub enum ContentParticleEntry {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Repetition {
-    Once,
+    One,
     ZeroOrMore,
     OneOrMore,
     ZeroOrOne,

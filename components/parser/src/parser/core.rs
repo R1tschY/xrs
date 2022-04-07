@@ -82,6 +82,36 @@ impl<'a, T: Parser<'a>> Parser<'a> for Plus<T> {
     }
 }
 
+pub fn separated<'a, T: Parser<'a>, S: Parser<'a>>(parser: T, separator: S) -> Separated<T, S> {
+    Separated { parser, separator }
+}
+
+pub struct Separated<T, S> {
+    parser: T,
+    separator: S,
+}
+
+impl<'a, T: Parser<'a>, S: Parser<'a>> Parser<'a> for Separated<T, S> {
+    type Attribute = Vec<T::Attribute>;
+    type Error = T::Error;
+
+    fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), T::Error> {
+        let mut res = vec![];
+
+        let (attr, cur) = self.parser.parse(cur)?;
+        res.push(attr);
+
+        let mut cur = cur;
+        while let Ok((_, cursor)) = self.separator.parse(cur) {
+            let (attr, cursor) = self.parser.parse(cursor)?;
+
+            res.push(attr);
+            cur = cursor;
+        }
+        Ok((res, cur))
+    }
+}
+
 macro_rules! def_seq {
     ($($i:tt: $t:ident),+ $(,)?) => {
         impl<

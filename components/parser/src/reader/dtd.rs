@@ -1,19 +1,22 @@
 use xml_chars::{XmlAsciiChar, XmlChar};
 
-use crate::dtd::{ContentSpec, DocTypeDecl, Element, ExternalId, IntSubset, MarkupDeclEntry};
-use crate::parser::core::{kleene, optional, Kleene, Optional};
+use crate::dtd::{
+    ContentParticle, ContentParticleEntry, ContentSpec, DocTypeDecl, Element, ExternalId,
+    IntSubset, MarkupDeclEntry, Repetition,
+};
+use crate::parser::core::{kleene, optional, separated, Kleene, Optional, Separated};
 use crate::parser::helper::map_error;
 use crate::parser::string::lit;
 use crate::parser::Parser;
 use crate::reader::{xml_lit, xml_terminated, CharTerminated, NameToken, SToken, TerminatedChars};
-use crate::{Cursor, XmlError};
+use crate::{Cursor, XmlDtdError, XmlError};
 
 // 2.3 Common Syntactic Constructs
 // Literals
 
 /// External identifier literal
 /// `SystemLiteral ::= ('"' [^"]* '"') | ("'" [^']* "'")`
-pub struct SystemLiteralToken;
+struct SystemLiteralToken;
 
 impl<'a> Parser<'a> for SystemLiteralToken {
     type Attribute = &'a str;
@@ -44,7 +47,7 @@ impl<'a> Parser<'a> for SystemLiteralToken {
 
 /// Identifier literal
 /// `PubidLiteral ::= '"' PubidChar* '"' | "'" (PubidChar - "'")* "'"`
-pub struct PubidLiteralToken;
+struct PubidLiteralToken;
 
 impl<'a> Parser<'a> for PubidLiteralToken {
     type Attribute = &'a str;
@@ -113,7 +116,7 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
 /// Internal Subset
 ///
 ///     intSubset ::= (markupdecl | DeclSep)*
-pub struct IntSubsetToken;
+struct IntSubsetToken;
 
 impl<'a> Parser<'a> for IntSubsetToken {
     type Attribute = IntSubset;
@@ -136,7 +139,7 @@ impl<'a> Parser<'a> for IntSubsetToken {
 ///     markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
 ///     DeclSep ::= PEReference | S
 ///
-pub struct MarkupDeclToken;
+struct MarkupDeclToken;
 
 impl<'a> Parser<'a> for MarkupDeclToken {
     type Attribute = Option<MarkupDeclEntry>;
@@ -178,7 +181,7 @@ impl<'a> Parser<'a> for MarkupDeclToken {
 ///
 ///     elementdecl	   ::=   	'<!ELEMENT' S Name S contentspec S? '>'
 ///
-pub struct ElementDeclToken;
+struct ElementDeclToken;
 
 impl<'a> Parser<'a> for ElementDeclToken {
     type Attribute = Element;
@@ -205,7 +208,7 @@ impl<'a> Parser<'a> for ElementDeclToken {
 ///
 ///     contentspec	   ::=   	'EMPTY' | 'ANY' | Mixed | children
 ///
-pub struct ContentSpecToken;
+struct ContentSpecToken;
 
 impl<'a> Parser<'a> for ContentSpecToken {
     type Attribute = ContentSpec;
@@ -216,8 +219,12 @@ impl<'a> Parser<'a> for ContentSpecToken {
             Ok((ContentSpec::Empty, cursor))
         } else if let Ok((_, cursor)) = xml_lit("ANY").parse(cursor) {
             Ok((ContentSpec::Any, cursor))
+        } else if let Ok((spec, cursor)) = MixedToken.parse(cursor) {
+            Ok((spec, cursor))
+        } else if let Ok((spec, cursor)) = ChildrenToken.parse(cursor) {
+            Ok((spec, cursor))
         } else {
-            todo!()
+            Err(XmlError::DtdError(XmlDtdError::SyntaxError))
         }
     }
 }
@@ -234,20 +241,144 @@ impl<'a> Parser<'a> for ContentSpecToken {
 // cp   	   ::=   	(Name | choice | seq) ('?' | '*' | '+')?
 // choice	   ::=   	'(' S? cp ( S? '|' S? cp )+ S? ')'
 // seq  	   ::=   	'(' S? cp ( S? ',' S? cp )* S? ')'
+struct ChildrenToken;
 
-// examples
-// <!ELEMENT spec (front, body, back?)>
-// <!ELEMENT div1 (head, (p | list | note)*, div2*)>
-// <!ELEMENT dictionary-body (%div.mix; | %dict.mix;)*>
+impl<'a> Parser<'a> for ChildrenToken {
+    type Attribute = ContentSpec;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (entry, cursor) = if let Ok((choice, cursor)) = ChoiceToken.parse(cursor) {
+            (choice, cursor)
+        } else if let Ok((seq, cursor)) = SeqToken.parse(cursor) {
+            (seq, cursor)
+        } else {
+            return Err(XmlError::DtdError(XmlDtdError::SyntaxError));
+        };
+        let (repetition, cursor) = RepetitionToken.parse(cursor)?;
+
+        Ok((
+            ContentSpec::Children(ContentParticle { entry, repetition }),
+            cursor,
+        ))
+    }
+}
+
+struct CpToken;
+
+impl<'a> Parser<'a> for CpToken {
+    type Attribute = ContentParticle;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (entry, cursor) = if let Ok((name, cursor)) = NameToken.parse(cursor) {
+            (ContentParticleEntry::Name(name.to_string()), cursor)
+        } else if let Ok((choice, cursor)) = ChoiceToken.parse(cursor) {
+            (choice, cursor)
+        } else if let Ok((seq, cursor)) = SeqToken.parse(cursor) {
+            (seq, cursor)
+        } else {
+            return Err(XmlError::DtdError(XmlDtdError::SyntaxError));
+        };
+        let (repetition, cursor) = RepetitionToken.parse(cursor)?;
+
+        Ok((ContentParticle { entry, repetition }, cursor))
+    }
+}
+
+struct RepetitionToken;
+
+impl<'a> Parser<'a> for RepetitionToken {
+    type Attribute = Repetition;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Ok((choice, cursor)) = xml_lit("?").parse(cursor) {
+            Ok((Repetition::ZeroOrOne, cursor))
+        } else if let Ok((seq, cursor)) = xml_lit("*").parse(cursor) {
+            Ok((Repetition::ZeroOrMore, cursor))
+        } else if let Ok((seq, cursor)) = xml_lit("+").parse(cursor) {
+            Ok((Repetition::OneOrMore, cursor))
+        } else {
+            Ok((Repetition::One, cursor))
+        }
+    }
+}
+
+struct ChoiceToken;
+
+impl<'a> Parser<'a> for ChoiceToken {
+    type Attribute = ContentParticleEntry;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = xml_lit("(").parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (cps, cursor) =
+            separated(CpToken, (optional(SToken), xml_lit("|"), optional(SToken))).parse(cursor)?;
+
+        if cps.len() < 2 {
+            return Err(XmlError::DtdError(XmlDtdError::SyntaxError));
+        }
+
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (_, cursor) = xml_lit(")").parse(cursor)?;
+
+        Ok((ContentParticleEntry::Choice(cps), cursor))
+    }
+}
+
+struct SeqToken;
+
+impl<'a> Parser<'a> for SeqToken {
+    type Attribute = ContentParticleEntry;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = xml_lit("(").parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (cps, cursor) =
+            separated(CpToken, (optional(SToken), xml_lit(","), optional(SToken))).parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (_, cursor) = xml_lit(")").parse(cursor)?;
+
+        Ok((ContentParticleEntry::Seq(cps), cursor))
+    }
+}
 
 // 3.2.2 Mixed Content
 
-// 	Mixed	   ::=   	'(' S? '#PCDATA' (S? '|' S? Name)* S? ')*' | '(' S? '#PCDATA' S? ')'
+/// Mixed Content
+///
+///     Mixed	   ::=   	'(' S? '#PCDATA' (S? '|' S? Name)* S? ')*' | '(' S? '#PCDATA' S? ')'
+struct MixedToken;
 
-// examples
-// <!ELEMENT p (#PCDATA|a|ul|b|i|em)*>
-// <!ELEMENT p (#PCDATA | %font; | %phrase; | %special; | %form;)* >
-// <!ELEMENT b (#PCDATA)>
+impl<'a> Parser<'a> for MixedToken {
+    type Attribute = ContentSpec;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = xml_lit("(").parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (_, cursor) = optional(xml_lit("#PCDATA")).parse(cursor)?;
+        let (names, cursor) =
+            kleene((optional(SToken), xml_lit("|"), optional(SToken), NameToken)).parse(cursor)?;
+        let (_, cursor) = xml_lit(")").parse(cursor)?;
+
+        if let Ok((_, cursor)) = xml_lit("*").parse(cursor) {
+            Ok((
+                ContentSpec::Mixed(names.into_iter().map(|name| name.3.to_string()).collect()),
+                cursor,
+            ))
+        } else {
+            if names.len() == 0 {
+                Ok((ContentSpec::PCData, cursor))
+            } else {
+                Err(XmlError::DtdError(XmlDtdError::SyntaxError))
+            }
+        }
+    }
+}
 
 // 4.1 Character and Entity References
 
@@ -475,7 +606,7 @@ mod tests {
             assert!(cursor.is_at_end());
             assert_eq!(
                 &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
-                    "greeting".to_string(),
+                    "p".to_string(),
                     ContentSpec::Mixed(vec!["emph".to_string()])
                 )])),
                 dtd.internal_subset()
@@ -533,23 +664,23 @@ mod tests {
             assert!(cursor.is_at_end());
             assert_eq!(
                 &Some(IntSubset::new(vec![MarkupDeclEntry::new_element(
-                    "b".to_string(),
+                    "spec".to_string(),
                     ContentSpec::Children(ContentParticle {
                         entry: ContentParticleEntry::Seq(vec![
                             ContentParticle {
                                 entry: ContentParticleEntry::Name("front".to_string()),
-                                repetition: Repetition::Once
+                                repetition: Repetition::One
                             },
                             ContentParticle {
                                 entry: ContentParticleEntry::Name("body".to_string()),
-                                repetition: Repetition::Once
+                                repetition: Repetition::One
                             },
                             ContentParticle {
                                 entry: ContentParticleEntry::Name("back".to_string()),
                                 repetition: Repetition::ZeroOrOne
                             }
                         ]),
-                        repetition: Repetition::Once
+                        repetition: Repetition::One
                     })
                 )])),
                 dtd.internal_subset()
@@ -571,21 +702,21 @@ mod tests {
                         entry: ContentParticleEntry::Seq(vec![
                             ContentParticle {
                                 entry: ContentParticleEntry::Name("head".to_string()),
-                                repetition: Repetition::Once
+                                repetition: Repetition::One
                             },
                             ContentParticle {
                                 entry: ContentParticleEntry::Choice(vec![
                                     ContentParticle {
                                         entry: ContentParticleEntry::Name("p".to_string()),
-                                        repetition: Repetition::Once
+                                        repetition: Repetition::One
                                     },
                                     ContentParticle {
                                         entry: ContentParticleEntry::Name("list".to_string()),
-                                        repetition: Repetition::Once
+                                        repetition: Repetition::One
                                     },
                                     ContentParticle {
                                         entry: ContentParticleEntry::Name("note".to_string()),
-                                        repetition: Repetition::Once
+                                        repetition: Repetition::One
                                     }
                                 ]),
                                 repetition: Repetition::ZeroOrMore
@@ -595,7 +726,7 @@ mod tests {
                                 repetition: Repetition::ZeroOrMore
                             }
                         ]),
-                        repetition: Repetition::Once
+                        repetition: Repetition::One
                     })
                 )])),
                 dtd.internal_subset()

@@ -283,4 +283,6 @@ pub enum XmlError {
 
 /// Fatal DTD parsing error
 #[derive(Clone, Debug, PartialEq)]
-pub enum XmlDtdError {}
+pub enum XmlDtdError {
+    SyntaxError,
+}
