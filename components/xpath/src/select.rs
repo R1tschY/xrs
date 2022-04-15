@@ -14,13 +14,21 @@ impl Selector for XPath {
 }
 
 impl Selector for Expr {
-    fn select<'i, 't>(&self, _ctx: &Context<'i, 't>) -> Result<Object<'i, 't>, XPathError> {
+    fn select<'i, 't>(&self, ctx: &Context<'i, 't>) -> Result<Object<'i, 't>, XPathError> {
         match self {
             Expr::Binary(_) => todo!(),
             Expr::Unary(_) => todo!(),
             Expr::Ident(_) => todo!(),
             Expr::Literal(string) => Ok(Object::String(string.value.clone().into())),
             Expr::Number(number) => Ok(Object::Number(number.value)),
+            Expr::FunctionCall(func_call) => ctx.call_function(
+                func_call.ident.as_str(),
+                func_call
+                    .args
+                    .iter()
+                    .map(|expr| expr.select(ctx))
+                    .collect::<Result<Vec<Object<'i, 't>>, XPathError>>()?,
+            ),
         }
     }
 }

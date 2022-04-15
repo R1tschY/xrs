@@ -124,6 +124,17 @@ pub enum Token {
     Punct(Punct),
 }
 
+impl Token {
+    pub fn span(&self) -> Span {
+        match self {
+            Token::Ident(ident) => ident.span,
+            Token::Literal(literal) => literal.span,
+            Token::Number(number) => number.span,
+            Token::Punct(punct) => punct.span,
+        }
+    }
+}
+
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

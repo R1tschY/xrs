@@ -3,6 +3,3 @@ pub use parser::RecursiveShuntingYardParser;
 
 mod expr;
 mod parser;
-
-#[derive(Debug, PartialEq)]
-pub struct ParseError;

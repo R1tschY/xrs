@@ -82,12 +82,33 @@ impl Display for ExprUnary {
 }
 
 #[derive(Debug)]
+pub struct FunctionCall {
+    pub ident: Ident,
+    pub args: Vec<Expr>,
+}
+
+impl Display for FunctionCall {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "{}({})",
+            self.ident,
+            self.args
+                .iter()
+                .map(|arg| arg.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        ))
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Binary(ExprBinary),
     Unary(ExprUnary),
     Ident(Ident),
     Literal(Literal),
     Number(Number),
+    FunctionCall(FunctionCall),
 }
 
 impl Display for Expr {
@@ -98,6 +119,7 @@ impl Display for Expr {
             Expr::Ident(ident) => Display::fmt(ident, f),
             Expr::Literal(lit) => Display::fmt(lit, f),
             Expr::Number(num) => Display::fmt(num, f),
+            Expr::FunctionCall(func_call) => Display::fmt(func_call, f),
         }
     }
 }

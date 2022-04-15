@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::lex::Span;
 use crate::parser::Expr;
 
 macro_rules! token {
@@ -82,9 +83,25 @@ mod select;
 mod utils;
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct SyntaxError {
+    message: String,
+    span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum XPathError {
     WrongFunctionArgument(String),
     CallToUndefinedFunction(String),
+    SyntaxError(SyntaxError),
+}
+
+impl XPathError {
+    pub fn syntax(message: impl Into<String>, span: Span) -> XPathError {
+        XPathError::SyntaxError(SyntaxError {
+            message: message.into(),
+            span,
+        })
+    }
 }
 
 struct XPath {
