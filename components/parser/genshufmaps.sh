@@ -2,6 +2,9 @@
 echo "// name"
 python3 genshufmap.py -R "a-zA-Z0-9:\-_"
 
+echo "// whitespace"
+python3 genshufmap.py -R " \t\n\r"
+
 echo "// whitespace + char end"
 python3 genshufmap.py -R " \t\n\r" "<&\r"
 
