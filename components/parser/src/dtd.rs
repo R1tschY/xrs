@@ -95,12 +95,40 @@ pub enum Repetition {
     ZeroOrOne,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum EntityDef {
+    Internal(String),
+    External {
+        external_id: ExternalId,
+        ndata: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GEDecl {
+    pub name: String,
+    pub def: EntityDef,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PEDef {
+    Internal(String),
+    External(ExternalId),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PEDecl {
+    pub name: String,
+    pub def: PEDef,
+}
+
 /// Entry of Markup Declaration
 #[derive(Clone, Debug, PartialEq)]
 pub enum MarkupDeclEntry {
     Element(Element),
     AttList(String),
-    Entity(String),
+    GeneralEntity(GEDecl),
+    ParameterEntity(PEDecl),
     Notation(String),
     PI(PI<'static>),
     Comment(String),
@@ -113,5 +141,9 @@ impl MarkupDeclEntry {
             name,
             content_spec: content,
         })
+    }
+
+    pub fn new_entity(name: String, def: EntityDef) -> Self {
+        Self::GeneralEntity(GEDecl { name, def })
     }
 }

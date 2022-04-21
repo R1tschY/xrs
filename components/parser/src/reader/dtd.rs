@@ -1,8 +1,8 @@
 use xml_chars::{XmlAsciiChar, XmlChar};
 
 use crate::dtd::{
-    ContentParticle, ContentParticleEntry, ContentSpec, DocTypeDecl, Element, ExternalId,
-    IntSubset, MarkupDeclEntry, Repetition,
+    ContentParticle, ContentParticleEntry, ContentSpec, DocTypeDecl, Element, EntityDef,
+    ExternalId, GEDecl, IntSubset, MarkupDeclEntry, PEDecl, PEDef, Repetition,
 };
 use crate::parser::core::{kleene, optional, separated, Kleene, Optional, Separated};
 use crate::parser::helper::map_error;
@@ -73,6 +73,38 @@ impl<'a> Parser<'a> for PubidLiteralToken {
                 return Err(XmlError::IllegalChar(c));
             }
             Ok((res, cursor.advance(1)))
+        } else {
+            Err(XmlError::UnexpectedEof)
+        }
+    }
+}
+
+/// `EntityValue ::= '"' ([^%&"] | PEReference | Reference)* '"'
+///               |  "'" ([^%&'] | PEReference | Reference)* "'"`
+pub struct EntityValueToken;
+
+impl<'a> Parser<'a> for EntityValueToken {
+    type Attribute = String;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (quote_char, cursor) = if let Ok((_, cursor)) = xml_lit("\"").parse(cursor) {
+            (b'\"', cursor)
+        } else if let Ok((_, cursor)) = xml_lit("\'").parse(cursor) {
+            (b'\'', cursor)
+        } else {
+            return Err(XmlError::ExpectToken("EntityValue"));
+        };
+
+        // TODO: detect PEReference and Reference
+        if let Some((pos, _)) = cursor
+            .rest_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, &c)| c == quote_char)
+        {
+            let (res, cursor) = cursor.advance2(pos);
+            Ok((res.to_string(), cursor.advance(1)))
         } else {
             Err(XmlError::UnexpectedEof)
         }
@@ -150,6 +182,10 @@ impl<'a> Parser<'a> for MarkupDeclToken {
             Ok((None, cursor))
         } else if let Ok((element, cursor)) = ElementDeclToken.parse(cursor) {
             Ok((Some(MarkupDeclEntry::Element(element)), cursor))
+        } else if let Ok((entity, cursor)) = GEDeclToken.parse(cursor) {
+            Ok((Some(MarkupDeclEntry::GeneralEntity(entity)), cursor))
+        } else if let Ok((entity, cursor)) = PEDeclToken.parse(cursor) {
+            Ok((Some(MarkupDeclEntry::ParameterEntity(entity)), cursor))
         } else {
             // TODO
             Err(XmlError::UnexpectedDtdEntry)
@@ -384,6 +420,99 @@ impl<'a> Parser<'a> for MixedToken {
 
 // PEReference	   ::=   	'%' Name ';'
 
+// 4.2 Entity Declarations
+
+/// `GEDecl ::= '<!ENTITY' S Name S EntityDef S? '>'`
+struct GEDeclToken;
+
+impl<'a> Parser<'a> for GEDeclToken {
+    type Attribute = GEDecl;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = xml_lit("<!ENTITY").parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (name, cursor) = NameToken.parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (def, cursor) = EntityDefToken.parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+        let (_, cursor) = xml_lit(">").parse(cursor)?;
+
+        Ok((
+            GEDecl {
+                name: name.to_string(),
+                def,
+            },
+            cursor,
+        ))
+    }
+}
+
+/// `EntityDef ::= EntityValue | (ExternalID NDataDecl?)`
+struct EntityDefToken;
+
+impl<'a> Parser<'a> for EntityDefToken {
+    type Attribute = EntityDef;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Ok((value, cursor)) = EntityValueToken.parse(cursor) {
+            Ok((EntityDef::Internal(value), cursor))
+        } else if let Ok(((external_id, ndata), cursor)) =
+            (ExternalIdToken, optional(NDataDeclToken)).parse(cursor)
+        {
+            Ok((EntityDef::External { external_id, ndata }, cursor))
+        } else {
+            Err(XmlError::DtdError(XmlDtdError::SyntaxError))
+        }
+    }
+}
+
+/// `PEDecl ::= '<!ENTITY' S '%' S Name S PEDef S? '>'`
+struct PEDeclToken;
+
+impl<'a> Parser<'a> for PEDeclToken {
+    type Attribute = PEDecl;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = xml_lit("<!ENTITY").parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = xml_lit("%").parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (name, cursor) = NameToken.parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (def, cursor) = PEDefToken.parse(cursor)?;
+        let (_, cursor) = optional(SToken).parse(cursor)?;
+
+        Ok((
+            PEDecl {
+                name: name.to_string(),
+                def,
+            },
+            cursor,
+        ))
+    }
+}
+
+/// `PEDef ::= EntityValue | ExternalID`
+struct PEDefToken;
+
+impl<'a> Parser<'a> for PEDefToken {
+    type Attribute = PEDef;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        if let Ok((value, cursor)) = EntityValueToken.parse(cursor) {
+            Ok((PEDef::Internal(value), cursor))
+        } else if let Ok((external_id, cursor)) = ExternalIdToken.parse(cursor) {
+            Ok((PEDef::External(external_id), cursor))
+        } else {
+            Err(XmlError::DtdError(XmlDtdError::SyntaxError))
+        }
+    }
+}
+
 // 4.2.2 External Entities
 
 /// ExternalID ::= 'SYSTEM' S SystemLiteral | 'PUBLIC' S PubidLiteral S SystemLiteral
@@ -426,7 +555,21 @@ impl<'a> Parser<'a> for ExternalIdToken {
     }
 }
 
-// NDataDecl ::= S 'NDATA' S Name
+/// `NDataDecl ::= S 'NDATA' S Name`
+pub struct NDataDeclToken;
+
+impl<'a> Parser<'a> for NDataDeclToken {
+    type Attribute = String;
+    type Error = XmlError;
+
+    fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (_, cursor) = xml_lit("NDATA").parse(cursor)?;
+        let (_, cursor) = SToken.parse(cursor)?;
+        let (name, cursor) = NameToken.parse(cursor)?;
+        Ok((name.to_string(), cursor))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -743,6 +886,104 @@ mod tests {
                 .unwrap();
             assert!(cursor.is_at_end());
             assert_eq!(&Some(IntSubset::new(vec![])), dtd.internal_subset());
+        }
+    }
+
+    /// 4.2 Entity Declarations
+    mod entities {
+        use crate::dtd::{
+            ContentParticle, ContentParticleEntry, ContentSpec, Element, EntityDef, ExternalId,
+            GEDecl, IntSubset, MarkupDeclEntry, Repetition,
+        };
+        use crate::parser::Parser;
+        use crate::reader::dtd::DocTypeDeclToken;
+        use crate::{Cursor, XmlError};
+
+        #[test]
+        fn internal() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ENTITY Pub-Status \"This is a pre-release of the specification.\"> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_entity(
+                    "Pub-Status".to_string(),
+                    EntityDef::Internal("This is a pre-release of the specification.".to_string())
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn external1() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ENTITY open-hatch SYSTEM \"http://www.textuality.com/boilerplate/OpenHatch.xml\"> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_entity(
+                    "open-hatch".to_string(),
+                    EntityDef::External {
+                        external_id: ExternalId::System {
+                            system: "http://www.textuality.com/boilerplate/OpenHatch.xml"
+                                .to_string()
+                        },
+                        ndata: None
+                    }
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn external2() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ENTITY open-hatch PUBLIC \"-//Textuality//TEXT Standard open-hatch boilerplate//EN\" \"http://www.textuality.com/boilerplate/OpenHatch.xml\"> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_entity(
+                    "open-hatch".to_string(),
+                    EntityDef::External {
+                        external_id: ExternalId::Public {
+                            pub_id: "-//Textuality//TEXT Standard open-hatch boilerplate//EN"
+                                .to_string(),
+                            system: "http://www.textuality.com/boilerplate/OpenHatch.xml"
+                                .to_string()
+                        },
+                        ndata: None
+                    }
+                )])),
+                dtd.internal_subset()
+            );
+        }
+
+        #[test]
+        fn external3() {
+            let (dtd, cursor) = DocTypeDeclToken
+                .parse(Cursor::new(
+                    "<!DOCTYPE e [ <!ENTITY hatch-pic SYSTEM \"../grafix/OpenHatch.gif\" NDATA gif> ]>",
+                ))
+                .unwrap();
+            assert!(cursor.is_at_end());
+            assert_eq!(
+                &Some(IntSubset::new(vec![MarkupDeclEntry::new_entity(
+                    "hatch-pic".to_string(),
+                    EntityDef::External {
+                        external_id: ExternalId::System {
+                            system: "../grafix/OpenHatch.gif".to_string()
+                        },
+                        ndata: Some("gif".to_string())
+                    }
+                )])),
+                dtd.internal_subset()
+            );
         }
     }
 }
