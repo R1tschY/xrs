@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -14,11 +14,13 @@ use crate::parser::core::{kleene, optional, plus, raw, Plus};
 use crate::parser::helper::map_error;
 use crate::parser::string::{bytes, chars, lit};
 use crate::parser::Parser;
+use crate::reader::chars::is_ascii_content_char;
 use crate::reader::dtd::DocTypeDeclToken;
 use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::XmlEvent::Characters;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent, PI};
 
+pub mod chars;
 pub mod dtd;
 
 // Common
@@ -389,48 +391,46 @@ impl<'a> Parser<'a> for SDDeclToken {
 /// `CharRef ::= '&#' [0-9]+ ';' | '&#x' [0-9a-fA-F]+ ';'`
 struct CharRefToken;
 
+fn take_till_ascii_char(
+    cursor: Cursor,
+    f: impl Fn(u8) -> bool,
+) -> Result<(&str, Cursor), XmlError> {
+    if let Some((i, c)) = cursor
+        .rest_bytes()
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(i, c)| (f)(*c))
+    {
+        Ok(cursor.advance2(i))
+    } else {
+        Err(XmlError::UnexpectedEof)
+    }
+}
+
 impl<'a> Parser<'a> for CharRefToken {
     type Attribute = String;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
-        // TODO: char's do not accept high-surrogates und low-surrogates
-        let (code, cursor) = if let Ok(((_, code, _), cursor)) = (
-            xml_lit("&#"),
-            map_error(bytes(|c| c.is_ascii_digit()), |_| {
-                XmlError::InvalidCharacterReference("contains non-digit".to_string())
-            }),
-            xml_lit(";"),
-        )
-            .parse(cursor)
-        {
-            let character = u32::from_str(code)
-                .map_err(|_| XmlError::InvalidCharacterReference(code.to_string()))?;
-            (character, cursor)
-        } else if let Ok(((_, code, _), cursor)) = (
-            xml_lit("&#x"),
-            map_error(bytes(|c| c.is_ascii_hexdigit()), |_| {
-                XmlError::InvalidCharacterReference("contains non-hex-digit".to_string())
-            }),
-            xml_lit(";"),
-        )
-            .parse(cursor)
-        {
-            let character = u32::from_str_radix(code, 16)
-                .map_err(|_| XmlError::InvalidCharacterReference(code.to_string()))?;
-            (character, cursor)
-        } else {
+        if !cursor.has_next_str("&#") {
             return Err(XmlError::InvalidCharacterReference(String::new()));
+        }
+
+        let cursor = cursor.advance(2);
+        let (radix, cursor) = if cursor.has_next_str("x") {
+            (16, cursor.advance(1))
+        } else {
+            (10, cursor)
         };
 
-        let character: char = code
-            .try_into()
-            .map_err(|_| XmlError::InvalidCharacterReference(code.to_string()))?;
-        if !character.is_xml_char() {
-            Err(XmlError::InvalidCharacterReference(code.to_string()))
-        } else {
-            Ok((character.to_string(), cursor))
-        }
+        let (code, cursor) = take_till_ascii_char(cursor, |c| c == b';')?;
+        u32::from_str_radix(code, radix)
+            .ok()
+            .and_then(|code| char::try_from(code).ok())
+            .filter(|c| c.is_xml_char())
+            .map(move |c| (c.to_string(), cursor.advance(1)))
+            .ok_or_else(|| XmlError::InvalidCharacterReference(code.to_string()))
     }
 }
 
@@ -705,17 +705,20 @@ trait InternalXmlParser<'a> {
     }
 
     fn parse_characters(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
-        if let Some((i, _)) = self
+        if let Some((i, c)) = self
             .cursor()
-            .rest_bytes()
-            .iter()
-            .enumerate()
-            .find(|(_, &c)| c == b'<' || c == b'&' || c == b'\r')
+            .rest()
+            .char_indices()
+            .find(|(_, c)| !is_ascii_content_char(*c))
         {
-            let (chars, cursor) = self.cursor().advance2(i);
-            self.set_cursor(cursor);
-            // TODO: ]]> not allowed
-            Ok(Some(Characters(chars.into())))
+            if c.is_xml_char() {
+                let (chars, cursor) = self.cursor().advance2(i);
+                self.set_cursor(cursor);
+                // TODO: ]]> not allowed
+                Ok(Some(Characters(chars.into())))
+            } else {
+                Err(XmlError::InvalidCharacter(c))
+            }
         } else {
             Err(UnexpectedEof)
         }
@@ -1481,6 +1484,152 @@ mod tests {
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(Err(XmlError::CDataEndInContent), reader);
         }
+
+        #[test]
+        fn valid_content() {
+            let mut reader =
+                Reader::new("<e>\u{9}\u{A}\u{20}\u{D7FF}\u{E000}\u{FFFD}\u{10000}\u{10FFFF}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Ok(Some(XmlEvent::characters(
+                    "\u{9}\u{A}\u{20}\u{D7FF}\u{E000}\u{FFFD}\u{10000}\u{10FFFF}"
+                ))),
+                reader
+            );
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn valid_content_entities() {
+            let mut reader = Reader::new(
+                "<e>&#x9;&#xA;&#xD;&#x20;&#xD7FF;&#xE000;&#xFFFD;&#x10000;&#x10FFFF;</e>",
+            );
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{9}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{A}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{D}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{20}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{D7FF}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{E000}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{FFFD}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{10000}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::characters("\u{10FFFF}"))), reader);
+            assert_evt!(Ok(Some(XmlEvent::etag("e"))), reader);
+            assert_evt!(Ok(None), reader);
+        }
+
+        #[test]
+        fn invalid_content1() {
+            let mut reader = Reader::new("<e>\u{1}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::InvalidCharacter('\u{1}')), reader);
+        }
+
+        #[test]
+        fn invalid_content2() {
+            let mut reader = Reader::new("<e>&#1;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("1".to_string())),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_content3() {
+            let mut reader = Reader::new("<e>\u{8}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::InvalidCharacter('\u{8}')), reader);
+        }
+
+        #[test]
+        fn invalid_content4() {
+            let mut reader = Reader::new("<e>\u{B}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::InvalidCharacter('\u{B}')), reader);
+        }
+
+        #[test]
+        fn invalid_content5() {
+            let mut reader = Reader::new("<e>\u{1F}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::InvalidCharacter('\u{1F}')), reader);
+        }
+
+        #[test]
+        fn invalid_content6() {
+            let mut reader = Reader::new("<e>&#1F;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("1F".to_string())),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_content8() {
+            let mut reader = Reader::new("<e>&#D800;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("D800".to_string())),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_content10() {
+            let mut reader = Reader::new("<e>&#DFFF;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("DFFF".to_string())),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_content11() {
+            let mut reader = Reader::new("<e>\u{FFFE}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::InvalidCharacter('\u{FFFE}')), reader);
+        }
+
+        #[test]
+        fn invalid_content12() {
+            let mut reader = Reader::new("<e>&#FFFE;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("FFFE".to_string())),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_content13() {
+            let mut reader = Reader::new("<e>\u{FFFF}</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(Err(XmlError::InvalidCharacter('\u{FFFF}')), reader);
+        }
+
+        #[test]
+        fn invalid_content14() {
+            let mut reader = Reader::new("<e>&#xFFFF;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("FFFF".to_string())),
+                reader
+            );
+        }
+
+        #[test]
+        fn invalid_content15() {
+            let mut reader = Reader::new("<e>&#x110000;</e>");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
+            assert_evt!(
+                Err(XmlError::InvalidCharacterReference("110000".to_string())),
+                reader
+            );
+        }
     }
 
     mod comment {
@@ -1690,7 +1839,7 @@ mod tests {
             let mut reader = Reader::new("<e>&#x10000000;</e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(
-                Err(XmlError::InvalidCharacterReference("268435456".to_string())),
+                Err(XmlError::InvalidCharacterReference("10000000".to_string())),
                 reader
             );
         }
@@ -1710,7 +1859,7 @@ mod tests {
             let mut reader = Reader::new("<e>&#xFGH;</e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(
-                Err(XmlError::InvalidCharacterReference("".to_string())),
+                Err(XmlError::InvalidCharacterReference("FGH".to_string())),
                 reader
             );
         }
@@ -1720,7 +1869,7 @@ mod tests {
             let mut reader = Reader::new("<e>&#1F;</e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
             assert_evt!(
-                Err(XmlError::InvalidCharacterReference("".to_string())),
+                Err(XmlError::InvalidCharacterReference("1F".to_string())),
                 reader
             );
         }
