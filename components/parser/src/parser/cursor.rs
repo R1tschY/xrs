@@ -66,6 +66,21 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    pub unsafe fn advance_unchecked(&self, bytes: usize) -> Self {
+        let (_ignore, rest) = unsafe {
+            (
+                self.rest.get_unchecked(0..bytes),
+                self.rest.get_unchecked(bytes..self.rest.len()),
+            )
+        };
+        #[cfg(test)]
+        println!("ADVANCE {}: {:?}", bytes, _ignore);
+        Self {
+            rest,
+            offset: self.offset + bytes,
+        }
+    }
+
     pub fn advance2(&self, bytes: usize) -> (&'a str, Self) {
         let (diff, rest) = self.rest.split_at(bytes);
         #[cfg(test)]
