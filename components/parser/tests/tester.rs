@@ -74,7 +74,7 @@ impl ReaderIT {
 
     fn write_decl<'a>(&self, writer: &mut String, decl: XmlDecl) -> Result<(), XmlError> {
         if decl.version() != "1.0" {
-            write!(writer, "<?xml version=\"{}\"/>", decl.version());
+            write!(writer, "<?xml version=\"{}\"?>", decl.version());
         }
         Ok(())
     }
