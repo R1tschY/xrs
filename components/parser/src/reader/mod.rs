@@ -712,6 +712,7 @@ trait InternalXmlParser<'a> {
             .find(|(_, c)| !is_ascii_content_char(*c))
         {
             if c.is_xml_char() {
+                debug_assert!(i > 0);
                 let (chars, cursor) = self.cursor().advance2(i);
                 self.set_cursor(cursor);
                 // TODO: ]]> not allowed
