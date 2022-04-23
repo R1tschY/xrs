@@ -1,5 +1,5 @@
 [package]
-name = "xml-dom"
+name = "xrs-dom"
 version = "0.1.0"
 authors = ["Richard Liebscher <r1tschy@posteo.de>"]
 edition = "2018"
@@ -11,4 +11,4 @@ quick-xml = "^0.22.0"
 memchr = "^2.3.4"
 
 [dev-dependencies]
-xml-xts = { path = "../xts" }
+xrs-xts = { path = "../xts" }

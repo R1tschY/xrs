@@ -1,4 +1,4 @@
-use xml_parser::{NsReader, XmlError, XmlNsEvent};
+use xrs_parser::{NsReader, XmlError, XmlNsEvent};
 
 use crate::datamodel::{AttributeNode, Child, ElementNode, PINode, RootNode};
 use crate::utils::CowStrHelpers;

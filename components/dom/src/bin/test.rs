@@ -1,7 +1,7 @@
 use std::fs;
-use xml_dom::reader::quick_xml::QuickXmlDomReader;
-use xml_dom::reader::DomReader;
-use xml_dom::validate::NonValidator;
+use xrs_dom::reader::quick_xml::QuickXmlDomReader;
+use xrs_dom::reader::DomReader;
+use xrs_dom::validate::NonValidator;
 
 fn main() {
     // ARRANGE

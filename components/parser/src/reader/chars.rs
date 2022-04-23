@@ -1,4 +1,4 @@
-use xml_chars::XmlChar;
+use xrs_chars::XmlChar;
 
 #[repr(u8)]
 enum Category {

@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use xml_chars::{XmlAsciiChar, XmlChar};
+use xrs_chars::{XmlAsciiChar, XmlChar};
 
 use crate::parser::core::{kleene, optional, plus, raw, Plus};
 use crate::parser::helper::map_error;

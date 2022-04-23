@@ -5,7 +5,7 @@ use std::arch::x86_64::{
 };
 use std::mem::transmute;
 use std::ptr;
-use xml_chars::XmlAsciiChar;
+use xrs_chars::XmlAsciiChar;
 
 #[allow(non_camel_case_types)]
 pub type m128i = __m128i;

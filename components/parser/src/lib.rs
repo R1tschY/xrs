@@ -10,8 +10,8 @@ pub use namespace::parser::*;
 pub use namespace::*;
 use parser::cursor::Cursor;
 pub use reader::Reader;
-use xml_chars::XmlAsciiChar;
-use xml_chars::XmlChar;
+use xrs_chars::XmlAsciiChar;
+use xrs_chars::XmlChar;
 
 use crate::dtd::DocTypeDecl;
 use crate::XmlError::{ExpectedElementEnd, IllegalNameStartChar};

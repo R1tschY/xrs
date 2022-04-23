@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use xml_xts::{Test, TestCases, TestSuite, Type, XmlTester};
+use xrs_xts::{Test, TestCases, TestSuite, Type, XmlTester};
 
 fn process_test<W: Write>(
     writer: &mut W,

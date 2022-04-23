@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use xml_chars::{XmlAsciiChar, XmlChar};
+use xrs_chars::{XmlAsciiChar, XmlChar};
 
 use crate::lex::token::{Token, Tokens};
 use crate::lex::{Ident, LexError, Literal, Number, Punct, Spacing};

@@ -1,4 +1,4 @@
-use xml_chars::{XmlAsciiChar, XmlChar};
+use xrs_chars::{XmlAsciiChar, XmlChar};
 
 use crate::dtd::{
     ContentParticle, ContentParticleEntry, ContentSpec, DocTypeDecl, Element, EntityDef,
