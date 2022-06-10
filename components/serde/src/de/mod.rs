@@ -554,10 +554,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
                 (&mut self.de).deserialize_struct(name, fields, visitor)
             }
             XmlEvent::STag(_) => Err(self.de.error(Reason::Tag(name))),
-            _ => {
-                dbg!("var");
-                Err(self.de.error(Reason::Start))
-            }
+            _ => Err(self.de.error(Reason::Start)),
         }
     }
 
@@ -572,10 +569,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
                 (&mut self.de).deserialize_enum(name, variants, visitor)
             }
             XmlEvent::STag(_) => Err(self.de.error(Reason::Tag(name))),
-            _ => {
-                dbg!("var");
-                Err(self.de.error(Reason::Start))
-            }
+            _ => Err(self.de.error(Reason::Start)),
         }
     }
 
@@ -592,6 +586,31 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+
+    fn parse<'de, T: Deserialize<'de>>(s: &'de str) -> T {
+        match from_str(s) {
+            Ok(val) => val,
+            Err(err) => {
+                let (pre, suf) = s.split_at(err.offset());
+                let pre = match pre.rsplit_once('\n') {
+                    Some((_, line_pre)) => line_pre,
+                    None => pre,
+                };
+                let suf = match suf.split_once('\n') {
+                    Some((line_suf, _)) => line_suf,
+                    None => suf,
+                };
+                let indent = " ".repeat(err.offset());
+                panic!(
+                    "Parser error: {}\n{}{}\n{}^",
+                    err.to_string(),
+                    pre,
+                    suf,
+                    indent
+                );
+            }
+        }
+    }
 
     #[test]
     fn simple_struct_from_attributes() {
@@ -622,6 +641,7 @@ mod tests {
     #[test]
     fn simple_struct_from_attribute_and_child() {
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "item")]
         struct Item {
             #[serde(rename = "@name")]
             name: String,
@@ -634,7 +654,7 @@ mod tests {
             </item>
         "##;
 
-        let item: Item = from_str(s).unwrap();
+        let item: Item = parse(s);
 
         assert_eq!(
             item,

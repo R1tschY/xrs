@@ -84,7 +84,7 @@ impl fmt::Display for Reason {
             Reason::NoMarkupExpected => write!(f, "Expecting only characters"),
             Reason::MarkupExpected => write!(f, "Expecting only markup"),
             Reason::RootStruct => write!(f, "Can only deserialize struct on root level"),
-            Reason::Tag(tag) => write!(f, "Expecting start tag '{}'", tag),
+            Reason::Tag(tag) => write!(f, "Expecting start tag <{} ...>", tag),
         }
     }
 }

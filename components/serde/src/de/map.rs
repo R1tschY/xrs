@@ -13,6 +13,7 @@ use xrs_parser::Attribute;
 enum MapValue<'de> {
     Empty,
     Attribute { value: Cow<'de, str> },
+    Nested,
     InnerValue,
 }
 
@@ -61,6 +62,7 @@ impl<'a, 'de> de::MapAccess<'de> for MapAccess<'a, 'de> {
             self.value = MapValue::InnerValue;
             seed.deserialize(INNER_VALUE.into_deserializer()).map(Some)
         } else {
+            self.value = MapValue::Nested;
             if let Some(stag) = self.de.next_maybe_start()? {
                 seed.deserialize(stag.name.into_deserializer()).map(Some)
             } else {
@@ -75,7 +77,7 @@ impl<'a, 'de> de::MapAccess<'de> for MapAccess<'a, 'de> {
     ) -> Result<K::Value, Self::Error> {
         match std::mem::replace(&mut self.value, MapValue::Empty) {
             MapValue::Attribute { value } => seed.deserialize(EscapedDeserializer::new(value)),
-            MapValue::InnerValue => seed.deserialize(&mut *self.de),
+            MapValue::Nested | MapValue::InnerValue => seed.deserialize(&mut *self.de),
             MapValue::Empty => unreachable!(),
         }
     }
