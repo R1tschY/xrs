@@ -1,7 +1,8 @@
 #![allow(unused)]
 
 use std::borrow::Cow;
-use std::fmt::Formatter;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 use std::fs::read_to_string;
 use std::str::from_utf8;
 use std::{fmt, io};
@@ -242,7 +243,7 @@ impl<'a> XmlEvent<'a> {
 }
 
 /// Fatal parsing error
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum XmlError {
     IllegalNameStartChar(char),
     IllegalChar(char),
@@ -280,10 +281,20 @@ pub enum XmlError {
     UnexpectedCharacter(char),
     CommentColonColon,
     UnknownNamespacePrefix(String),
+    Io(String),
+    Decoding(String),
 }
 
+impl Display for XmlError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+impl Error for XmlError {}
+
 /// Fatal DTD parsing error
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum XmlDtdError {
     SyntaxError,
 }

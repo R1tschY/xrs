@@ -914,6 +914,10 @@ impl<'a> DocumentParser<'a> {
         &self.attributes
     }
 
+    pub fn drain_attributes(&mut self) -> Vec<Attribute<'a>> {
+        self.attributes.drain(..).collect()
+    }
+
     pub fn offset(&self) -> usize {
         self.cursor.offset()
     }
@@ -945,6 +949,10 @@ impl EntityParserState {
 
     fn attributes(&self) -> &[Attribute<'static>] {
         &self.state.attributes
+    }
+
+    fn drain_attributes(&mut self) -> Vec<Attribute<'static>> {
+        self.state.attributes.drain(..).collect()
     }
 
     fn offset(&self) -> usize {
@@ -1150,6 +1158,16 @@ impl<'a> Reader<'a> {
         }
     }
 
+    pub fn top_name(&self) -> Option<&str> {
+        if let Some(parser) = self.sub_parsers.last() {
+            if let Some(e) = parser.state.stack.last() {
+                return Some(e as &str);
+            }
+        }
+
+        self.root_parser.stack.last().copied()
+    }
+
     pub fn attributes(&self) -> &[Attribute<'a>] {
         if let Some(parser) = self.sub_parsers.last() {
             parser.attributes()
@@ -1158,7 +1176,22 @@ impl<'a> Reader<'a> {
         }
     }
 
-    #[inline]
+    pub fn drain_attributes(&mut self) -> Vec<Attribute<'a>> {
+        if let Some(parser) = self.sub_parsers.last_mut() {
+            parser.drain_attributes()
+        } else {
+            self.root_parser.drain_attributes()
+        }
+    }
+
+    pub fn unparsed(&self) -> &str {
+        if let Some(parser) = self.sub_parsers.last() {
+            &parser.entity.text[parser.state.offset..]
+        } else {
+            self.root_parser.cursor.rest()
+        }
+    }
+
     pub fn cursor_offset(&self) -> usize {
         if let Some(parser) = self.sub_parsers.last() {
             parser.offset()

@@ -1,0 +1,15 @@
+[package]
+name = "xrs-serde"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+xrs-parser = { path = "../parser" }
+xrs-chars = { path = "../chars" }
+serde = "1"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"]}
+serde-value = "0.7"

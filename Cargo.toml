@@ -6,6 +6,7 @@ members = [
     "components/dom",
     "components/xpath",
     "components/chars",
+    "components/serde",
 ]
 
 [profile.release]
