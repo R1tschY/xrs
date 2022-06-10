@@ -238,13 +238,6 @@ impl<'a> Deserializer<'a> {
         Ok(())
     }
 
-    fn expect_end(&mut self) -> Result<(), Error> {
-        match self.next()? {
-            XmlEvent::ETag(_) => Ok(()),
-            _ => Err(self.error(Reason::End)),
-        }
-    }
-
     fn skip_ignorable_and_whitespace(&mut self) -> Result<(), Error> {
         loop {
             match self.peek()? {
@@ -350,10 +343,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_unit<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         match self.next()? {
-            XmlEvent::STag(_) => {
-                self.expect_end()?;
-                visitor.visit_unit().map_err(|err| self.fix_position(err))
-            }
+            XmlEvent::ETag(_) => visitor.visit_unit(),
             e => Err(self.error(Reason::InvalidUnit(format!("{:?}", e)))),
         }
     }
@@ -600,7 +590,7 @@ mod tests {
                     Some((line_suf, _)) => line_suf,
                     None => suf,
                 };
-                let indent = " ".repeat(err.offset());
+                let indent = " ".repeat(pre.len());
                 panic!(
                     "Parser error: {}\n{}{}\n{}^",
                     err.to_string(),
@@ -627,7 +617,7 @@ mod tests {
 	        <item name="hello" source="world.rs" />
 	    "##;
 
-        let item: Item = from_str(s).unwrap();
+        let item: Item = parse(s);
 
         assert_eq!(
             item,
@@ -668,6 +658,7 @@ mod tests {
     #[test]
     fn simple_struct_from_elements() {
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "item")]
         struct Item {
             name: String,
             source: String,
@@ -680,7 +671,7 @@ mod tests {
             </item>
         "##;
 
-        let item: Item = from_str(s).unwrap();
+        let item: Item = parse(s);
 
         assert_eq!(
             item,
@@ -694,7 +685,6 @@ mod tests {
     #[test]
     fn nested_collection() {
         #[derive(Debug, Deserialize, PartialEq)]
-        #[serde(rename = "item")]
         struct Item {
             #[serde(rename = "@name")]
             name: String,
@@ -703,6 +693,7 @@ mod tests {
         }
 
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "project")]
         struct Project {
             #[serde(rename = "@name")]
             name: String,
@@ -712,13 +703,13 @@ mod tests {
         }
 
         let s = r##"
-	    <project name="my_project">
-		<item name="hello1" source="world1.rs" />
-		<item name="hello2" source="world2.rs" />
-	    </project>
-	"##;
+            <project name="my_project">
+                <item name="hello1" source="world1.rs" />
+                <item name="hello2" source="world2.rs" />
+            </project>
+        "##;
 
-        let project: Project = from_str(s).unwrap();
+        let project: Project = parse(s);
 
         assert_eq!(
             project,
@@ -753,6 +744,7 @@ mod tests {
         }
 
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "enums")]
         struct MyEnums {
             // TODO: This should be #[serde(flatten)], but right now serde don't support flattening of sequences
             // See https://github.com/serde-rs/serde/issues/1905
@@ -761,14 +753,14 @@ mod tests {
         }
 
         let s = r##"
-        <enums>
-            <A>test</A>
-            <B name="hello" flag="true" />
-            <C />
-        </enums>
+            <enums>
+                <A>test</A>
+                <B name="hello" flag="true" />
+                <C />
+            </enums>
         "##;
 
-        let project: MyEnums = from_str(s).unwrap();
+        let project: MyEnums = parse(s);
 
         assert_eq!(
             project,
@@ -786,55 +778,11 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_bytes() {
-        use serde::Deserialize;
-
-        #[derive(Debug, PartialEq)]
-        struct Item {
-            bytes: Vec<u8>,
-        }
-
-        impl<'de> Deserialize<'de> for Item {
-            fn deserialize<D>(d: D) -> Result<Self, D::Error>
-            where
-                D: serde::de::Deserializer<'de>,
-            {
-                struct ItemVisitor;
-
-                impl<'de> de::Visitor<'de> for ItemVisitor {
-                    type Value = Item;
-
-                    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-                        fmt.write_str("byte data")
-                    }
-
-                    fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
-                        Ok(Item { bytes: v.to_vec() })
-                    }
-                }
-
-                Ok(d.deserialize_byte_buf(ItemVisitor)?)
-            }
-        }
-
-        let s = r#"<item>bytes</item>"#;
-        let item: Item = from_reader(s.as_bytes()).unwrap();
-
-        assert_eq!(
-            item,
-            Item {
-                bytes: "bytes".as_bytes().to_vec(),
-            }
-        );
-    }
-
-    /// Test for https://github.com/tafia/quick-xml/issues/231
-    #[test]
     fn implicit_value() {
         use serde_value::Value;
 
         let s = r#"<root>content</root>"#;
-        let item: Value = from_str(s).unwrap();
+        let item: Value = parse(s);
 
         assert_eq!(
             item,
@@ -858,7 +806,7 @@ mod tests {
         }
 
         let s = r#"<root>content</root>"#;
-        let item: Item = from_str(s).unwrap();
+        let item: Item = parse(s);
 
         assert_eq!(
             item,
@@ -871,10 +819,11 @@ mod tests {
     #[test]
     fn without_value() {
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "root")]
         struct Item;
 
-        let s = r#"<root>content</root>"#;
-        let item: Item = from_str(s).unwrap();
+        let s = r#"<root></root>"#;
+        let item: Item = parse(s);
 
         assert_eq!(item, Item);
     }
@@ -882,9 +831,10 @@ mod tests {
     #[test]
     fn unit() {
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "root")]
         struct Unit;
 
-        let data: Unit = from_str("<root/>").unwrap();
+        let data: Unit = parse("<root/>");
         assert_eq!(data, Unit);
     }
 
@@ -893,13 +843,13 @@ mod tests {
         #[derive(Debug, Deserialize, PartialEq)]
         struct Newtype(bool);
 
-        let data: Newtype = from_str("<root>true</root>").unwrap();
+        let data: Newtype = parse("<root>true</root>");
         assert_eq!(data, Newtype(true));
     }
 
     #[test]
     fn tuple() {
-        let data: (f32, String) = from_str("<root>42</root><root>answer</root>").unwrap();
+        let data: (f32, String) = parse("<root>42</root><root>answer</root>");
         assert_eq!(data, (42.0, "answer".into()));
     }
 
@@ -908,7 +858,7 @@ mod tests {
         #[derive(Debug, Deserialize, PartialEq)]
         struct Tuple(f32, String);
 
-        let data: Tuple = from_str("<root>42</root><root>answer</root>").unwrap();
+        let data: Tuple = parse("<root>42</root><root>answer</root>");
         assert_eq!(data, Tuple(42.0, "answer".into()));
     }
 
@@ -923,8 +873,7 @@ mod tests {
                 string: String,
             }
 
-            let data: Struct =
-                from_str(r#"<root><float>42</float><string>answer</string></root>"#).unwrap();
+            let data: Struct = parse(r#"<root><float>42</float><string>answer</string></root>"#);
             assert_eq!(
                 data,
                 Struct {
@@ -944,7 +893,7 @@ mod tests {
                 string: String,
             }
 
-            let data: Struct = from_str(r#"<root float="42" string="answer"/>"#).unwrap();
+            let data: Struct = parse(r#"<root float="42" string="answer"/>"#);
             assert_eq!(
                 data,
                 Struct {
@@ -961,6 +910,7 @@ mod tests {
         #[test]
         fn elements() {
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             struct Struct {
                 nested: Nested,
                 string: String,
@@ -971,10 +921,8 @@ mod tests {
                 float: f32,
             }
 
-            let data: Struct = from_str(
-                r#"<root><string>answer</string><nested><float>42</float></nested></root>"#,
-            )
-            .unwrap();
+            let data: Struct =
+                parse(r#"<root><string>answer</string><nested><float>42</float></nested></root>"#);
             assert_eq!(
                 data,
                 Struct {
@@ -987,6 +935,7 @@ mod tests {
         #[test]
         fn attributes() {
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             struct Struct {
                 nested: Nested,
                 #[serde(rename = "@string")]
@@ -999,8 +948,7 @@ mod tests {
                 float: f32,
             }
 
-            let data: Struct =
-                from_str(r#"<root string="answer"><nested float="42"/></root>"#).unwrap();
+            let data: Struct = parse(r#"<root string="answer"><nested float="42"/></root>"#);
             assert_eq!(
                 data,
                 Struct {
@@ -1030,8 +978,7 @@ mod tests {
                 float: String,
             }
 
-            let data: Struct =
-                from_str(r#"<root><float>42</float><string>answer</string></root>"#).unwrap();
+            let data: Struct = parse(r#"<root><float>42</float><string>answer</string></root>"#);
             assert_eq!(
                 data,
                 Struct {
@@ -1058,7 +1005,7 @@ mod tests {
                 float: String,
             }
 
-            let data: Struct = from_str(r#"<root float="42" string="answer"/>"#).unwrap();
+            let data: Struct = parse(r#"<root float="42" string="answer"/>"#);
             assert_eq!(
                 data,
                 Struct {
@@ -1153,19 +1100,19 @@ mod tests {
 
             #[test]
             fn unit() {
-                let data: Node = from_str("<Unit/>").unwrap();
+                let data: Node = parse("<Unit/>");
                 assert_eq!(data, Node::Unit);
             }
 
             #[test]
             fn newtype() {
-                let data: Node = from_str("<Newtype>true</Newtype>").unwrap();
+                let data: Node = parse("<Newtype>true</Newtype>");
                 assert_eq!(data, Node::Newtype(true));
             }
 
             #[test]
             fn tuple_struct() {
-                let data: Workaround = from_str("<Tuple>42</Tuple><Tuple>answer</Tuple>").unwrap();
+                let data: Workaround = parse("<Tuple>42</Tuple><Tuple>answer</Tuple>");
                 assert_eq!(data, Workaround::Tuple(42.0, "answer".into()));
             }
 
@@ -1188,8 +1135,7 @@ mod tests {
 
                 #[test]
                 fn attributes() {
-                    let data: NodeAttrs =
-                        from_str(r#"<Struct float="42" string="answer"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<Struct float="42" string="answer"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Struct {
@@ -1252,8 +1198,7 @@ mod tests {
 
                 #[test]
                 fn attributes() {
-                    let data: NodeAttrs =
-                        from_str(r#"<Flatten float="42" string="answer"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<Flatten float="42" string="answer"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Flatten {
@@ -1327,13 +1272,13 @@ mod tests {
 
                 #[test]
                 fn elements() {
-                    let data: Node = from_str(r#"<root><tag>Unit</tag></root>"#).unwrap();
+                    let data: Node = parse(r#"<root><tag>Unit</tag></root>"#);
                     assert_eq!(data, Node::Unit);
                 }
 
                 #[test]
                 fn attributes() {
-                    let data: NodeAttrs = from_str(r#"<root tag="Unit"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<root tag="Unit"/>"#);
                     assert_eq!(data, NodeAttrs::Unit);
                 }
             }
@@ -1344,16 +1289,14 @@ mod tests {
                 #[test]
                 #[ignore = "Prime cause: deserialize_any under the hood + https://github.com/serde-rs/serde/issues/1183"]
                 fn elements() {
-                    let data: Node =
-                        from_str(r#"<root><tag>Newtype</tag><value>true</value></root>"#).unwrap();
+                    let data: Node = parse(r#"<root><tag>Newtype</tag><value>true</value></root>"#);
                     assert_eq!(data, Node::Newtype(NewtypeContent { value: true }));
                 }
 
                 #[test]
                 #[ignore = "Prime cause: deserialize_any under the hood + https://github.com/serde-rs/serde/issues/1183"]
                 fn attributes() {
-                    let data: NodeAttrs =
-                        from_str(r#"<root tag="Newtype" value="true"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<root tag="Newtype" value="true"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Newtype(NewtypeContentAttrs { value: true })
@@ -1383,7 +1326,7 @@ mod tests {
                 #[test]
                 fn attributes() {
                     let data: NodeAttrs =
-                        from_str(r#"<root tag="Struct" float="42" string="answer"/>"#).unwrap();
+                        parse(r#"<root tag="Struct" float="42" string="answer"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Struct {
@@ -1449,7 +1392,7 @@ mod tests {
                 #[test]
                 fn attributes() {
                     let data: NodeAttrs =
-                        from_str(r#"<root tag="Flatten" float="42" string="answer"/>"#).unwrap();
+                        parse(r#"<root tag="Flatten" float="42" string="answer"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Flatten {
@@ -1531,13 +1474,13 @@ mod tests {
 
                 #[test]
                 fn elements() {
-                    let data: Node = from_str(r#"<root><tag>Unit</tag></root>"#).unwrap();
+                    let data: Node = parse(r#"<root><tag>Unit</tag></root>"#);
                     assert_eq!(data, Node::Unit);
                 }
 
                 #[test]
                 fn attributes() {
-                    let data: NodeAttrs = from_str(r#"<root tag="Unit"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<root tag="Unit"/>"#);
                     assert_eq!(data, NodeAttrs::Unit);
                 }
             }
@@ -1556,7 +1499,7 @@ mod tests {
                 #[test]
                 fn attributes() {
                     let data: NodeAttrs =
-                        from_str(r#"<root tag="Newtype"><content>true</content></root>"#).unwrap();
+                        parse(r#"<root tag="Newtype"><content>true</content></root>"#);
                     assert_eq!(data, NodeAttrs::Newtype(true));
                 }
             }
@@ -1759,21 +1702,21 @@ mod tests {
             fn unit() {
                 // Unit variant consists just from the tag, and because tags
                 // are not written, nothing is written
-                let data: Node = from_str("").unwrap();
+                let data: Node = parse("");
                 assert_eq!(data, Node::Unit);
             }
 
             #[test]
             #[ignore = "Prime cause: deserialize_any under the hood + https://github.com/serde-rs/serde/issues/1183"]
             fn newtype() {
-                let data: Node = from_str("true").unwrap();
+                let data: Node = parse("true");
                 assert_eq!(data, Node::Newtype(true));
             }
 
             #[test]
             #[ignore = "Prime cause: deserialize_any under the hood + https://github.com/serde-rs/serde/issues/1183"]
             fn tuple_struct() {
-                let data: Workaround = from_str("<root>42</root><root>answer</root>").unwrap();
+                let data: Workaround = parse("<root>42</root><root>answer</root>");
                 assert_eq!(data, Workaround::Tuple(42.0, "answer".into()));
             }
 
@@ -1798,8 +1741,7 @@ mod tests {
                 #[test]
                 #[ignore = "Prime cause: deserialize_any under the hood + https://github.com/serde-rs/serde/issues/1183"]
                 fn attributes() {
-                    let data: NodeAttrs =
-                        from_str(r#"<root float="42" string="answer"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<root float="42" string="answer"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Struct {
@@ -1832,7 +1774,7 @@ mod tests {
                 #[test]
                 fn attributes() {
                     let data: NodeAttrs =
-                        from_str(r#"<root string="answer"><nested float="42"/></root>"#).unwrap();
+                        parse(r#"<root string="answer"><nested float="42"/></root>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Holder {
@@ -1863,8 +1805,7 @@ mod tests {
 
                 #[test]
                 fn attributes() {
-                    let data: NodeAttrs =
-                        from_str(r#"<root float="42" string2="answer"/>"#).unwrap();
+                    let data: NodeAttrs = parse(r#"<root float="42" string2="answer"/>"#);
                     assert_eq!(
                         data,
                         NodeAttrs::Flatten {
