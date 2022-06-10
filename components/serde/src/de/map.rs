@@ -1,23 +1,18 @@
 //! Serde `Deserializer` module
 
 use std::borrow::Cow;
-use std::fmt::format;
-use std::io::BufRead;
 
 use serde::de::{self, DeserializeSeed, IntoDeserializer};
 
-use crate::error::Reason;
 use crate::{
     de::{escape::EscapedDeserializer, Deserializer, INNER_VALUE},
     Error,
 };
-use std::vec;
-use xrs_parser::{Attribute, STag, XmlEvent};
+use xrs_parser::Attribute;
 
 enum MapValue<'de> {
     Empty,
     Attribute { value: Cow<'de, str> },
-    Nested,
     InnerValue,
 }
 
@@ -80,7 +75,7 @@ impl<'a, 'de> de::MapAccess<'de> for MapAccess<'a, 'de> {
     ) -> Result<K::Value, Self::Error> {
         match std::mem::replace(&mut self.value, MapValue::Empty) {
             MapValue::Attribute { value } => seed.deserialize(EscapedDeserializer::new(value)),
-            MapValue::Nested | MapValue::InnerValue => seed.deserialize(&mut *self.de),
+            MapValue::InnerValue => seed.deserialize(&mut *self.de),
             MapValue::Empty => unreachable!(),
         }
     }

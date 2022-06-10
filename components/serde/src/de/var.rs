@@ -1,10 +1,8 @@
-use std::io::BufRead;
-
 use serde::de::value::CowStrDeserializer;
 use serde::de::{self, Deserializer as SerdeDeserializer, IntoDeserializer};
-use xrs_parser::{XmlError, XmlEvent};
+use xrs_parser::XmlEvent;
 
-use crate::de::{escape::EscapedDeserializer, Deserializer};
+use crate::de::Deserializer;
 use crate::error::Reason;
 use crate::Error;
 

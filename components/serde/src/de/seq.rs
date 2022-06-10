@@ -1,13 +1,10 @@
 use std::borrow::Cow;
-use std::io::BufRead;
-use std::str::{from_utf8, Utf8Error};
 
 use serde::de;
 use xrs_parser::XmlEvent;
-use xrs_parser::XmlEvent::STag;
 
 use crate::de::Deserializer;
-use crate::error::{Reason, ResultExt};
+use crate::error::Reason;
 use crate::Error;
 
 /// A SeqAccess

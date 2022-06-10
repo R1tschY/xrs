@@ -1,11 +1,9 @@
 //! Serde `Deserializer` module
 
 use std::borrow::Cow;
-use std::str::from_utf8;
 
 use serde::de::{self, Visitor};
 use serde::{self, forward_to_deserialize_any};
-use xrs_parser::XmlError;
 
 use crate::{error::Reason, error::ResultExt, Error, Result};
 

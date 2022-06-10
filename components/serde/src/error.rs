@@ -1,9 +1,6 @@
+use std::fmt;
 use std::result::Result as StdResult;
-use std::str::Utf8Error;
-use std::{fmt, io};
 
-use crate::Deserializer;
-use serde::Serializer;
 use std::num::{ParseFloatError, ParseIntError};
 use xrs_parser::XmlError;
 
@@ -46,28 +43,20 @@ pub(crate) enum Reason {
     Float(std::num::ParseFloatError),
     /// Xml parsing error
     Xml(XmlError),
-    /// Unexpected end of attributes
-    EndOfAttributes,
     /// Unexpected end of file
     Eof,
     /// Invalid value for a boolean
     InvalidBoolean(String),
     /// Invalid unit value
     InvalidUnit(String),
-    /// Invalid event for Enum
-    InvalidEnum(String),
     /// Expecting only characters
     NoMarkupExpected,
     /// Unexpected characters
     MarkupExpected,
-    /// Expecting Text event
-    Text,
     /// Expecting Start event
     Start,
     /// Expecting End event
     End,
-    /// Unsupported operation
-    Unsupported(&'static str),
     /// Expecting struct as root object
     RootStruct,
     /// Expecting tag name
@@ -85,21 +74,13 @@ impl fmt::Display for Reason {
             },
             Reason::Int(e) => write!(f, "Invalid integer: {}", e),
             Reason::Float(e) => write!(f, "Invalid float: {}", e),
-            Reason::EndOfAttributes => write!(f, "Unexpected end of attributes"),
             Reason::Eof => write!(f, "Unexpected end of file"),
             Reason::InvalidBoolean(v) => write!(f, "Invalid boolean value '{}'", v),
             Reason::InvalidUnit(v) => {
                 write!(f, "Invalid unit value '{}', expected empty string", v)
             }
-            Reason::InvalidEnum(e) => write!(
-                f,
-                "Invalid event for Enum, expecting Text or Start, got: {:?}",
-                e
-            ),
-            Reason::Text => write!(f, "Expecting Text event"),
             Reason::Start => write!(f, "Expecting Start event"),
             Reason::End => write!(f, "Expecting End event"),
-            Reason::Unsupported(s) => write!(f, "Unsupported operation: {}", s),
             Reason::NoMarkupExpected => write!(f, "Expecting only characters"),
             Reason::MarkupExpected => write!(f, "Expecting only markup"),
             Reason::RootStruct => write!(f, "Can only deserialize struct on root level"),

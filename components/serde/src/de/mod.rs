@@ -109,14 +109,12 @@
 
 use std::borrow::Cow;
 use std::io::BufRead;
-use std::os::unix::fs::chroot;
-use std::str::{from_utf8, Utf8Error};
 
 use serde::de::{self, DeserializeOwned, IntoDeserializer, Visitor};
 use serde::{serde_if_integer128, Deserialize};
 
 use xrs_chars::XmlAsciiChar;
-use xrs_parser::{Reader, STag, XmlError, XmlEvent};
+use xrs_parser::{Reader, STag, XmlEvent};
 
 use crate::de::cow::{CowStrExt, StrExt};
 use crate::error::Reason;
@@ -185,21 +183,6 @@ impl<'a> Deserializer<'a> {
                 }
             } else {
                 return Err(Error::new(Reason::Eof, 0));
-            }
-        }
-    }
-
-    fn next_start(&mut self) -> Result<STag<'a>, Error> {
-        loop {
-            match self.next()? {
-                XmlEvent::STag(e) => return Ok(e),
-                XmlEvent::ETag(_) => {
-                    return Err(self.error(Reason::Start));
-                }
-                XmlEvent::Characters(s) if !s.as_ref().is_xml_whitespace() => {
-                    return Err(self.error(Reason::MarkupExpected))
-                }
-                _ => {}
             }
         }
     }
@@ -274,17 +257,7 @@ impl<'a> Deserializer<'a> {
         }
     }
 
-    fn skip_ignorable(&mut self) -> Result<(), Error> {
-        loop {
-            match self.peek()? {
-                XmlEvent::Comment(_) | XmlEvent::PI(_) => (),
-                _ => return Ok(()),
-            }
-        }
-    }
-
     pub(crate) fn error(&self, reason: Reason) -> Error {
-        panic!("{}: {}", self.reader.unparsed(), reason);
         Error::new(reason, self.reader.cursor_offset())
     }
 
@@ -294,11 +267,6 @@ impl<'a> Deserializer<'a> {
 
     pub(crate) fn fix_position(&self, err: Error) -> Error {
         err.fix_position(|reason| self.error(reason))
-    }
-
-    fn set_peek(&mut self, evt: XmlEvent<'a>) {
-        debug_assert!(self.peek.is_none());
-        self.peek = Some(evt);
     }
 }
 
@@ -364,7 +332,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         .map_err(|err| self.fix_position(err))
     }
 
-    fn deserialize_bytes<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_bytes<V: de::Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Error> {
         // TODO: use base64 or hex?
         unimplemented!()
     }
@@ -503,7 +471,7 @@ macro_rules! forward_to_root_struct_error {
 impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
     type Error = Error;
 
-    fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_any<V: de::Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Error> {
         Err(self.root_struct_error())
     }
 
@@ -549,7 +517,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
         }
     }
 
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -558,9 +526,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
 
     fn deserialize_tuple_struct<V>(
         self,
-        name: &'static str,
-        len: usize,
-        visitor: V,
+        _name: &'static str,
+        _len: usize,
+        _visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
@@ -568,7 +536,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
         Err(self.root_struct_error())
     }
 
-    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -625,17 +593,17 @@ mod tests {
 
     use super::*;
 
-    #[derive(Debug, Deserialize, PartialEq)]
-    #[serde(rename = "item")]
-    struct Item {
-        #[serde(rename = "@name")]
-        name: String,
-        #[serde(rename = "@source")]
-        source: String,
-    }
-
     #[test]
     fn simple_struct_from_attributes() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "item")]
+        struct Item {
+            #[serde(rename = "@name")]
+            name: String,
+            #[serde(rename = "@source")]
+            source: String,
+        }
+
         let s = r##"
 	        <item name="hello" source="world.rs" />
 	    "##;
@@ -661,8 +629,8 @@ mod tests {
         }
 
         let s = r##"
-	    <item name="hello">
-            <source>world.rs</source>
+	        <item name="hello">
+                <source>world.rs</source>
             </item>
         "##;
 
@@ -677,17 +645,52 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Deserialize, PartialEq)]
-    struct Project {
-        #[serde(rename = "@name")]
-        name: String,
+    #[test]
+    fn simple_struct_from_elements() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Item {
+            name: String,
+            source: String,
+        }
 
-        #[serde(rename = "item", default)]
-        items: Vec<Item>,
+        let s = r##"
+	        <item>
+	            <name>hello</name>
+                <source>world.rs</source>
+            </item>
+        "##;
+
+        let item: Item = from_str(s).unwrap();
+
+        assert_eq!(
+            item,
+            Item {
+                name: "hello".to_string(),
+                source: "world.rs".to_string(),
+            }
+        );
     }
 
     #[test]
     fn nested_collection() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "item")]
+        struct Item {
+            #[serde(rename = "@name")]
+            name: String,
+            #[serde(rename = "@source")]
+            source: String,
+        }
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Project {
+            #[serde(rename = "@name")]
+            name: String,
+
+            #[serde(rename = "item", default)]
+            items: Vec<Item>,
+        }
+
         let s = r##"
 	    <project name="my_project">
 		<item name="hello1" source="world1.rs" />
@@ -715,28 +718,28 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Deserialize, PartialEq)]
-    enum MyEnum {
-        A(String),
-        B {
-            #[serde(rename = "@name")]
-            name: String,
-            #[serde(rename = "@flag")]
-            flag: bool,
-        },
-        C,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    struct MyEnums {
-        // TODO: This should be #[serde(flatten)], but right now serde don't support flattening of sequences
-        // See https://github.com/serde-rs/serde/issues/1905
-        #[serde(rename = "$value")]
-        items: Vec<MyEnum>,
-    }
-
     #[test]
     fn collection_of_enums() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        enum MyEnum {
+            A(String),
+            B {
+                #[serde(rename = "@name")]
+                name: String,
+                #[serde(rename = "@flag")]
+                flag: bool,
+            },
+            C,
+        }
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct MyEnums {
+            // TODO: This should be #[serde(flatten)], but right now serde don't support flattening of sequences
+            // See https://github.com/serde-rs/serde/issues/1905
+            #[serde(rename = "$value")]
+            items: Vec<MyEnum>,
+        }
+
         let s = r##"
         <enums>
             <A>test</A>
