@@ -1,10 +1,8 @@
 use std::borrow::Cow;
 
 use serde::de;
-use xrs_parser::XmlEvent;
 
 use crate::de::Deserializer;
-use crate::error::Reason;
 use crate::Error;
 
 /// A SeqAccess
@@ -39,18 +37,15 @@ impl<'de, 'a> de::SeqAccess<'de> for SeqAccess<'a, 'de> {
             *s -= 1;
         }
         if let Some(name) = &self.name {
-            match self.de.peek()? {
-                XmlEvent::STag(tag) => {
+            match self.de.next_maybe_start()? {
+                Some(tag) => {
                     if &tag.name == name {
-                        self.de.next()?;
                         seed.deserialize(&mut *self.de).map(Some)
                     } else {
                         Ok(None)
                     }
                 }
-                XmlEvent::ETag(_) => Ok(None),
-                XmlEvent::Characters(_) => Err(self.de.error(Reason::MarkupExpected)),
-                _ => unreachable!(),
+                None => Ok(None),
             }
         } else {
             self.name = Some(self.de.reader.top_name().unwrap().to_string().into());
