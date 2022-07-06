@@ -6,6 +6,7 @@ members = [
     "components/xpath",
     "components/chars",
     "components/serde",
+    "components/writer",
     "components/xmlrpc",
 ]
 
