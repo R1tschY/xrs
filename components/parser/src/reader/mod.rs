@@ -1168,6 +1168,19 @@ impl<'a> Reader<'a> {
         self.root_parser.stack.last().copied()
     }
 
+    pub fn top_name_cow(&self) -> Option<Cow<'a, str>> {
+        if let Some(parser) = self.sub_parsers.last() {
+            if let Some(e) = parser.state.stack.last() {
+                return Some(Cow::Owned(e.clone()));
+            }
+        }
+
+        self.root_parser
+            .stack
+            .last()
+            .map(|name| Cow::Borrowed(*name))
+    }
+
     pub fn attributes(&self) -> &[Attribute<'a>] {
         if let Some(parser) = self.sub_parsers.last() {
             parser.attributes()

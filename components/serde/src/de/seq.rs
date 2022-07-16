@@ -61,7 +61,7 @@ impl<'de, 'a> de::SeqAccess<'de> for SeqAccess<'a, 'de> {
                 }
             }
         } else {
-            self.name = Some(self.de.reader.top_name().unwrap().to_string().into());
+            self.name = Some(self.de.reader.top_name_cow().unwrap());
             seed.deserialize(&mut *self.de).map(Some)
         }
     }
