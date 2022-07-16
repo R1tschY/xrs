@@ -10,6 +10,7 @@ use crate::{
 };
 use xrs_parser::Attribute;
 
+#[derive(Debug)]
 enum MapValue<'de> {
     Empty,
     Attribute { value: Cow<'de, str> },
@@ -23,6 +24,7 @@ pub(crate) struct MapAccess<'a, 'de> {
     attributes: std::vec::IntoIter<Attribute<'de>>,
     value: MapValue<'de>,
     has_value_field: bool,
+    read_value_field: bool,
 }
 
 impl<'a, 'de> MapAccess<'a, 'de> {
@@ -42,6 +44,7 @@ impl<'a, 'de> MapAccess<'a, 'de> {
             attributes,
             value: MapValue::Empty,
             has_value_field,
+            read_value_field: false,
         })
     }
 }
@@ -59,8 +62,13 @@ impl<'a, 'de> de::MapAccess<'de> for MapAccess<'a, 'de> {
             seed.deserialize(Self::create_attr_key(&attr.name).into_deserializer())
                 .map(Some)
         } else if self.has_value_field {
-            self.value = MapValue::InnerValue;
-            seed.deserialize(INNER_VALUE.into_deserializer()).map(Some)
+            if self.read_value_field {
+                Ok(None)
+            } else {
+                self.value = MapValue::InnerValue;
+                self.read_value_field = true;
+                seed.deserialize(INNER_VALUE.into_deserializer()).map(Some)
+            }
         } else {
             self.value = MapValue::Nested;
             if let Some(stag) = self.de.next_maybe_start()? {

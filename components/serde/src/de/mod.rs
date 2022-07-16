@@ -1483,7 +1483,7 @@ mod tests {
             }
 
             #[derive(Debug, Deserialize, PartialEq)]
-            #[serde(tag = "@tag", content = "content")]
+            #[serde(tag = "@tag", content = "content", rename = "root")]
             enum NodeAttrs {
                 Unit,
                 Newtype(bool),
