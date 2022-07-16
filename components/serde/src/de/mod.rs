@@ -182,9 +182,19 @@ impl<'a> Deserializer<'a> {
                     _ => (),
                 }
             } else {
-                return Err(Error::new(Reason::Eof, 0));
+                return if let Some(top) = self.reader.top_name() {
+                    Err(Error::new(Reason::Eof, 0)
+                        .with_hint(0, format!("Expecting end of this element: {}", top)))
+                } else {
+                    unreachable!("Expecting an element at end of document")
+                };
             }
         }
+    }
+
+    fn withdraw(&mut self, evt: XmlEvent<'a>) {
+        assert!(self.peek.is_none());
+        self.peek = Some(evt);
     }
 
     fn next_maybe_start(&mut self) -> Result<Option<STag<'a>>, Error> {
@@ -259,7 +269,11 @@ impl<'a> Deserializer<'a> {
     }
 
     pub(crate) fn fix_position(&self, err: Error) -> Error {
-        err.fix_position(|reason| self.error(reason))
+        if err.offset() == 0 {
+            err.with_position(self.reader.cursor_offset())
+        } else {
+            err
+        }
     }
 }
 
@@ -483,10 +497,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
                 (&mut self.de).deserialize_unit_struct(name, visitor)
             }
             XmlEvent::STag(_) => Err(self.de.error(Reason::Tag(name))),
-            _ => {
-                dbg!("var");
-                Err(self.de.error(Reason::Start))
-            }
+            _ => Err(self.de.error(Reason::Start)),
         }
     }
 
@@ -500,10 +511,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut RootDeserializer<'de> {
                 (&mut self.de).deserialize_newtype_struct(name, visitor)
             }
             XmlEvent::STag(_) => Err(self.de.error(Reason::Tag(name))),
-            _ => {
-                dbg!("var");
-                Err(self.de.error(Reason::Start))
-            }
+            _ => Err(self.de.error(Reason::Start)),
         }
     }
 
@@ -683,6 +691,60 @@ mod tests {
     }
 
     #[test]
+    fn collection() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Item;
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "collection")]
+        struct Collection {
+            #[serde(rename = "item", default)]
+            items: Vec<Item>,
+        }
+
+        let s = r##"<collection><item/><item/></collection>"##;
+
+        let project: Collection = parse(s);
+
+        assert_eq!(
+            project,
+            Collection {
+                items: vec![Item, Item],
+            }
+        );
+    }
+
+    #[test]
+    fn embedded_collection() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Item;
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "collection")]
+        struct Collection {
+            pre: Item,
+
+            #[serde(rename = "item", default)]
+            items: Vec<Item>,
+
+            suf: Item,
+        }
+
+        let s = r##"<collection><pre/><item/><item/><suf/></collection>"##;
+
+        let project: Collection = parse(s);
+
+        assert_eq!(
+            project,
+            Collection {
+                pre: Item,
+                items: vec![Item, Item],
+                suf: Item
+            }
+        );
+    }
+
+    #[test]
     fn nested_collection() {
         #[derive(Debug, Deserialize, PartialEq)]
         struct Item {
@@ -778,6 +840,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "any not supported yet"]
     fn implicit_value() {
         use serde_value::Value;
 
@@ -800,6 +863,7 @@ mod tests {
     #[test]
     fn explicit_value() {
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "root")]
         struct Item {
             #[serde(rename = "$value")]
             content: String,
@@ -841,25 +905,11 @@ mod tests {
     #[test]
     fn newtype() {
         #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename = "root")]
         struct Newtype(bool);
 
         let data: Newtype = parse("<root>true</root>");
         assert_eq!(data, Newtype(true));
-    }
-
-    #[test]
-    fn tuple() {
-        let data: (f32, String) = parse("<root>42</root><root>answer</root>");
-        assert_eq!(data, (42.0, "answer".into()));
-    }
-
-    #[test]
-    fn tuple_struct() {
-        #[derive(Debug, Deserialize, PartialEq)]
-        struct Tuple(f32, String);
-
-        let data: Tuple = parse("<root>42</root><root>answer</root>");
-        assert_eq!(data, Tuple(42.0, "answer".into()));
     }
 
     mod struct_ {
@@ -868,6 +918,7 @@ mod tests {
         #[test]
         fn elements() {
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             struct Struct {
                 float: f64,
                 string: String,
@@ -886,6 +937,7 @@ mod tests {
         #[test]
         fn attributes() {
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             struct Struct {
                 #[serde(rename = "@float")]
                 float: f64,
@@ -991,6 +1043,7 @@ mod tests {
         #[test]
         fn attributes() {
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             struct Struct {
                 #[serde(flatten)]
                 nested: Nested,

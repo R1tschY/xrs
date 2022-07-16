@@ -12,15 +12,21 @@ pub struct Error(Box<ErrorImpl>);
 
 impl Error {
     pub(crate) fn new(reason: Reason, offset: usize) -> Self {
-        Self(Box::new(ErrorImpl { offset, reason }))
+        Self(Box::new(ErrorImpl {
+            offset,
+            reason,
+            hints: vec![],
+        }))
     }
 
-    pub(crate) fn fix_position(self, f: impl FnOnce(Reason) -> Error) -> Self {
-        if self.0.offset == 0 {
-            f(self.0.reason)
-        } else {
-            self
-        }
+    pub(crate) fn with_position(mut self, offset: usize) -> Self {
+        self.0.offset = offset;
+        self
+    }
+
+    pub(crate) fn with_hint(mut self, offset: usize, message: String) -> Self {
+        self.0.hints.push((offset, message));
+        self
     }
 
     pub fn offset(&self) -> usize {
@@ -32,15 +38,16 @@ impl Error {
 struct ErrorImpl {
     offset: usize,
     reason: Reason,
+    hints: Vec<(usize, String)>,
 }
 
 pub(crate) enum Reason {
     /// Serde custom error
     Message(String),
     /// Cannot parse to integer
-    Int(std::num::ParseIntError),
+    Int(ParseIntError),
     /// Cannot parse to float
-    Float(std::num::ParseFloatError),
+    Float(ParseFloatError),
     /// Xml parsing error
     Xml(XmlError),
     /// Unexpected end of file
@@ -92,10 +99,21 @@ impl fmt::Display for Reason {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.0.offset == 0 {
-            write!(f, "{}", self.0.reason)
+            write!(f, "{}", self.0.reason)?;
         } else {
-            write!(f, "{} at offset {}", self.0.reason, self.0.offset)
+            write!(f, "{} at offset {}", self.0.reason, self.0.offset)?;
         }
+        if !self.0.hints.is_empty() {
+            write!(f, " (")?;
+            for (i, hint) in self.0.hints.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", &hint.1)?;
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
     }
 }
 
@@ -104,6 +122,7 @@ impl fmt::Debug for Error {
         f.debug_struct("Error")
             .field("message", &self.0.reason.to_string())
             .field("offset", &self.0.offset)
+            .field("hints", &self.0.hints)
             .finish()
     }
 }

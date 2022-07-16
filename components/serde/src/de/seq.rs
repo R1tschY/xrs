@@ -1,8 +1,11 @@
 use std::borrow::Cow;
 
+use crate::de::cow::StrExt;
 use serde::de;
+use xrs_parser::XmlEvent;
 
 use crate::de::Deserializer;
+use crate::error::Reason;
 use crate::Error;
 
 /// A SeqAccess
@@ -37,15 +40,25 @@ impl<'de, 'a> de::SeqAccess<'de> for SeqAccess<'a, 'de> {
             *s -= 1;
         }
         if let Some(name) = &self.name {
-            match self.de.next_maybe_start()? {
-                Some(tag) => {
-                    if &tag.name == name {
-                        seed.deserialize(&mut *self.de).map(Some)
-                    } else {
-                        Ok(None)
+            loop {
+                match self.de.next()? {
+                    XmlEvent::STag(tag) => {
+                        return if &tag.name == name {
+                            seed.deserialize(&mut *self.de).map(Some)
+                        } else {
+                            self.de.withdraw(XmlEvent::STag(tag));
+                            Ok(None)
+                        }
                     }
+                    XmlEvent::ETag(tag) => {
+                        self.de.withdraw(XmlEvent::ETag(tag));
+                        return Ok(None);
+                    }
+                    XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace() => {
+                        return Err(self.de.error(Reason::MarkupExpected))
+                    }
+                    _ => {}
                 }
-                None => Ok(None),
             }
         } else {
             self.name = Some(self.de.reader.top_name().unwrap().to_string().into());
