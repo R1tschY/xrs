@@ -1100,6 +1100,7 @@ mod tests {
             use super::*;
 
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             enum Node {
                 Unit,
                 Newtype(bool),
@@ -1121,6 +1122,7 @@ mod tests {
             }
 
             #[derive(Debug, Deserialize, PartialEq)]
+            #[serde(rename = "root")]
             enum NodeAttrs {
                 Unit,
                 Newtype(bool),
@@ -1267,7 +1269,7 @@ mod tests {
             use super::*;
 
             #[derive(Debug, Deserialize, PartialEq)]
-            #[serde(tag = "tag")]
+            #[serde(tag = "tag", rename = "root")]
             enum Node {
                 Unit,
                 /// Primitives (such as `bool`) are not supported by serde in the internally tagged mode
@@ -1294,7 +1296,7 @@ mod tests {
             }
 
             #[derive(Debug, Deserialize, PartialEq)]
-            #[serde(tag = "@tag")]
+            #[serde(tag = "@tag", rename = "root")]
             enum NodeAttrs {
                 Unit,
                 /// Primitives (such as `bool`) are not supported by serde in the internally tagged mode
@@ -1461,7 +1463,7 @@ mod tests {
             use super::*;
 
             #[derive(Debug, Deserialize, PartialEq)]
-            #[serde(tag = "tag", content = "content")]
+            #[serde(tag = "tag", content = "content", rename = "root")]
             enum Node {
                 Unit,
                 Newtype(bool),
@@ -1692,7 +1694,7 @@ mod tests {
             use super::*;
 
             #[derive(Debug, Deserialize, PartialEq)]
-            #[serde(untagged)]
+            #[serde(untagged, rename = "root")]
             enum Node {
                 Unit,
                 Newtype(bool),
