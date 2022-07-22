@@ -1,0 +1,21 @@
+[package]
+name = "xrs-xmlrpc"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["datetime", "base64"]
+datetime = ["dep:time"]
+base64 = ["dep:base64"]
+
+[dependencies]
+xrs-parser = { path = "../parser" }
+xrs-chars = { path = "../chars" }
+
+serde = "1"
+time = { version = "^0.3.11", default-features = false, features = ["std", "formatting", "parsing"], optional = true }
+base64 = { version = "^0.13.0", optional = true }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"]}
+serde-value = "0.7"
