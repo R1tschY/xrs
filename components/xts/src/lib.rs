@@ -164,7 +164,7 @@ impl Default for Recommendation {
 }
 
 pub trait TestableParser {
-    fn is_wf(&self, input: &[u8], namespace: bool) -> bool;
+    fn check_well_formed(&self, input: &[u8], namespace: bool) -> Result<(), (String, usize)>;
     fn canonxml(&self, input: &[u8], namespace: bool) -> Result<String, Box<dyn Debug>>;
 }
 
@@ -176,6 +176,37 @@ impl Default for XmlTester {
     fn default() -> Self {
         XmlTester::new()
     }
+}
+
+fn offset_to_line_and_column(text: &[u8], offset: usize) -> Option<(usize, usize)> {
+    let mut cr = false;
+    let mut line = 1;
+    let mut line_start = 0;
+
+    for (i, c) in text[..offset].iter().enumerate() {
+        match c {
+            b'\r' if cr => {
+                line_start = i + 1;
+                line += 1;
+            }
+            b'\r' => {
+                cr = true;
+            }
+            b'\n' => {
+                line_start = i + 1;
+                line += 1;
+                cr = false;
+            }
+            _ if cr => {
+                line_start = i;
+                line += 1;
+                cr = false;
+            }
+            _ => cr = false,
+        }
+    }
+
+    Some((line, offset - line_start + 1))
 }
 
 impl XmlTester {
@@ -265,24 +296,32 @@ impl XmlTester {
         let path = base.join(&test.uri);
         let content = fs::read(&path).unwrap();
         match test.ty {
-            Type::Valid => assert!(
-                parser.is_wf(&content, test.namespace.into()),
-                "{}:0:0: should be well-formed ({} / {})",
-                path.display(),
-                &test.description[0],
-                &test.sections
-            ),
-            Type::Invalid => assert!(
-                parser.is_wf(&content, test.namespace.into()),
-                "{}:0:0: should be well-formed ({} / {})",
-                path.display(),
-                &test.description[0],
-                &test.sections
-            ),
+            Type::Valid | Type::Invalid => {
+                let result = parser.check_well_formed(&content, test.namespace.into());
+
+                match result {
+                    Ok(()) => (),
+                    Err((message, offset)) => {
+                        let (line, column) = offset_to_line_and_column(&content, offset).unwrap();
+                        assert!(
+                            false,
+                            "{}:{}:{}: should be well-formed ({}) [{}]: {}",
+                            path.display(),
+                            line,
+                            column,
+                            &test.description[0],
+                            &test.sections,
+                            message
+                        )
+                    }
+                }
+            }
             Type::Error => return,
             Type::NotWf => assert!(
-                !parser.is_wf(&content, test.namespace.into()),
-                "{}:0:0: should not be well-formed ({} / {})",
+                parser
+                    .check_well_formed(&content, test.namespace.into())
+                    .is_err(),
+                "{}:0:0: should not be well-formed ({}) [{}]",
                 path.display(),
                 &test.description[0],
                 &test.sections

@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use xml_xts::Test;
-use xml_xts::XmlTester;
+use xrs_xts::Test;
+use xrs_xts::XmlTester;
 
 use crate::tester::ReaderIT;
 

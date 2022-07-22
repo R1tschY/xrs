@@ -1,8 +1,8 @@
 use std::fmt::{Debug, Write};
 
-use xml_parser::{ETag, Reader, STag, XmlDecl, XmlError, XmlEvent, PI};
-use xml_xts::TestableParser;
-use xml_xts::XmlTester;
+use xrs_parser::{ETag, Reader, STag, XmlDecl, XmlError, XmlEvent, PI};
+use xrs_xts::TestableParser;
+use xrs_xts::XmlTester;
 
 mod tester;
 

@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 use std::fmt::Write;
 
-use xml_parser::{ETag, Reader, STag, XmlDecl, XmlError, XmlEvent, PI};
-use xml_xts::TestableParser;
+use xrs_parser::{ETag, Reader, STag, XmlDecl, XmlError, XmlEvent, PI};
+use xrs_xts::TestableParser;
 
 pub struct ReaderIT;
 
@@ -86,11 +86,10 @@ impl ReaderIT {
 }
 
 impl TestableParser for ReaderIT {
-    fn is_wf(&self, input: &[u8], namespace: bool) -> bool {
-        let input = if let Ok(input) = std::str::from_utf8(input) {
-            input
-        } else {
-            return false;
+    fn check_well_formed(&self, input: &[u8], namespace: bool) -> Result<(), (String, usize)> {
+        let input = match std::str::from_utf8(input) {
+            Ok(input) => input,
+            Err(err) => return Err((format!("{}", err), err.valid_up_to())),
         };
 
         let mut reader = Reader::new(input);
@@ -98,11 +97,10 @@ impl TestableParser for ReaderIT {
             match reader.next() {
                 Ok(Some(_)) => {}
                 Ok(None) => {
-                    return true;
+                    return Ok(());
                 }
                 Err(err) => {
-                    println!("ERROR: {:?}", err);
-                    return false;
+                    return Err((format!("{:?}", err), reader.cursor_offset()));
                 }
             }
         }
