@@ -1,9 +1,9 @@
-use serde::de::{EnumAccess, Error, MapAccess, SeqAccess, Unexpected, Visitor};
-use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Cow;
 use std::fmt::Formatter;
-use std::num::TryFromIntError;
+
+use serde::de::{Error, MapAccess, SeqAccess, Unexpected, Visitor};
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, PartialEq)]
 pub enum Value<'a> {
@@ -245,7 +245,7 @@ impl<'de> Serialize for Value<'de> {
             Value::Boolean(v) => serializer.serialize_bool(*v),
             Value::String(v) => serializer.serialize_str(v.as_ref()),
             Value::Double(v) => serializer.serialize_f64(*v),
-            Value::DateTimeIso8601(v) => {
+            Value::DateTimeIso8601(_v) => {
                 todo!()
             }
             Value::Base64(v) => serializer.serialize_bytes(v),

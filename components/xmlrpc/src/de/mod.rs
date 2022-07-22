@@ -1,27 +1,23 @@
 use std::borrow::Cow;
 use std::io::BufRead;
-use std::marker::PhantomData;
-use std::str::FromStr;
 
 use serde::de::value::CowStrDeserializer;
-use serde::de::{DeserializeOwned, IntoDeserializer, Visitor};
+use serde::de::{DeserializeOwned, IntoDeserializer};
 use serde::{de, forward_to_deserialize_any};
 use serde::{serde_if_integer128, Deserialize};
 use time::format_description::well_known::Iso8601;
 use time::OffsetDateTime;
 
-use crate::de::cow::{CowStrExt, StrExt};
-use xrs_chars::XmlAsciiChar;
-use xrs_parser::{Reader, STag, XmlEvent};
+pub use error::DeError;
+use xrs_parser::{Reader, STag, XmlEvent, XmlNsEvent};
 
+use crate::de::cow::{CowStrExt, StrExt};
 use crate::de::error::{DeError as Error, DeReason as Reason, DeReason};
 use crate::value::Value;
+use crate::MethodCall;
 
 mod cow;
 mod error;
-
-use crate::MethodCall;
-pub use error::DeError;
 
 pub struct Deserializer<'a> {
     reader: Reader<'a>,
@@ -204,9 +200,12 @@ impl<'a> Deserializer<'a> {
         }
     }
 
-    fn expect_end(&mut self) -> Result<(), Error> {
+    fn expect_end(&mut self, name: &'static str) -> Result<(), Error> {
         match self.next_ignore_whitespace()? {
-            XmlEvent::ETag(_) => Ok(()),
+            XmlEvent::ETag(etag) => {
+                debug_assert_eq!(etag.name(), name);
+                Ok(())
+            }
             _ => Err(self.error(Reason::End)),
         }
     }
@@ -240,7 +239,7 @@ impl<'a> Deserializer<'a> {
 
     fn deserialize_date_time_iso8601<'de, V: de::Visitor<'de>>(
         &mut self,
-        visitor: V,
+        _visitor: V,
     ) -> Result<V::Value, Error> {
         unimplemented!()
     }
@@ -312,8 +311,8 @@ impl<'a> Deserializer<'a> {
 macro_rules! deserialize_int {
     ($deserialize:ident => $ty:path, $visit:ident) => {
         fn $deserialize<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-            match self.next_ignore_whitespace()? {
-                XmlEvent::STag(stag) => match stag.name.as_ref() {
+            let res = match self.next_ignore_whitespace()? {
+                XmlEvent::STag(stag) => match stag.name() {
                     "i4" | "int" => {
                         let res = self.next_scalar_str()?.parse::<$ty>();
                         visitor.$visit(self.fix_result(res)?)
@@ -321,17 +320,21 @@ macro_rules! deserialize_int {
                     _ => Err(self.error(Reason::WrongType("`i4` or `int`", stag.name.to_string()))),
                 },
                 _ => Err(self.error(Reason::ValueExpected)),
-            }
+            }?;
+            self.expect_end("value")?;
+            Ok(res)
         }
     };
 }
 
 macro_rules! deserialize_double {
-    ($deserialize:ident => $ty:path, $visit:ident) => {
+    ($deserialize:ident => $ty:path, $visit:tt) => {
         fn $deserialize<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
             self.next_type("double")?;
-            let result = self.next_scalar_str()?.parse::<$ty>();
-            visitor.$visit(self.fix_result(result)?)
+            let res = self.next_scalar_str()?.parse::<$ty>();
+            let res: V::Value = visitor.$visit::<Error>(self.fix_result(res)?)?;
+            self.expect_end("value")?;
+            Ok(res)
         }
     };
 }
@@ -340,25 +343,27 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        match self.next_ignore_whitespace()? {
-            XmlEvent::STag(stag) => match stag.name.as_ref() {
+        let res = match self.next_ignore_whitespace()? {
+            XmlEvent::STag(stag) => match stag.name() {
                 "i4" | "int" => self.read_int(visitor),
+                "nil" => self.read_nil(visitor),
                 "boolean" => self.read_boolean(visitor),
                 "string" => self.read_string(visitor),
                 "double" => self.read_double(visitor),
-                "dateTime.iso8601" => self.read_date_time_iso8601(visitor),
                 "base64" => self.read_base64(visitor),
-                "nil" => self.read_nil(visitor),
                 "struct" => visitor
                     .visit_map(StructDeserializer::new(self))
                     .map_err(|err| self.fix_position(err)),
                 "array" => visitor
                     .visit_seq(ArrayDeserializer::new(self)?)
                     .map_err(|err| self.fix_position(err)),
+                "dateTime.iso8601" => self.read_date_time_iso8601(visitor),
                 _ => Err(self.error(Reason::UnknownType(stag.name.to_string()))),
             },
             _ => Err(self.error(Reason::ValueExpected)),
-        }
+        }?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     deserialize_int!(deserialize_i8 => i8, visit_i8);
@@ -379,18 +384,24 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_bool<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("boolean")?;
-        self.read_boolean(visitor)
+        let res = self.read_boolean(visitor)?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_char<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("string")?;
         let result = self.next_scalar_str()?.parse();
-        visitor.visit_char(self.fix_result(result)?)
+        let res = visitor.visit_char::<Error>(self.fix_result(result)?)?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_str<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("string")?;
-        self.read_string(visitor)
+        let res = self.read_string(visitor)?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_string<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -399,7 +410,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_bytes<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("base64")?;
-        self.read_base64(visitor)
+        let res = self.read_base64(visitor)?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_byte_buf<V>(
@@ -415,7 +428,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     fn deserialize_option<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         // TODO: ignore whitespace
         match self.peek()? {
-            XmlEvent::STag(stag) if stag.name.as_ref() == "nil" => {
+            XmlEvent::STag(stag) if stag.name() == "nil" => {
                 self.eat_peek();
 
                 let text = self.next_scalar_str()?;
@@ -423,7 +436,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                     return Err(self.error(Reason::InvalidNil(text.to_string())));
                 }
 
-                visitor.visit_none()
+                let res = visitor.visit_none::<Error>()?;
+                self.expect_end("value")?;
+                Ok(res)
             }
             _ => visitor.visit_some(self),
         }
@@ -431,7 +446,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_unit<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("nil")?;
-        self.read_nil(visitor)
+        let res = self.read_nil(visitor)?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_unit_struct<V: de::Visitor<'de>>(
@@ -452,9 +469,11 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("array")?;
-        visitor
+        let res = visitor
             .visit_seq(ArrayDeserializer::new(self)?)
-            .map_err(|err| self.fix_position(err))
+            .map_err(|err| self.fix_position(err))?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_tuple<V: de::Visitor<'de>>(
@@ -476,9 +495,11 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("struct")?;
-        visitor
+        let res = visitor
             .visit_map(StructDeserializer::new(self))
-            .map_err(|err| self.fix_position(err))
+            .map_err(|err| self.fix_position(err))?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_struct<V: de::Visitor<'de>>(
@@ -496,7 +517,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Error> {
-        match self.next()? {
+        let res = match self.next()? {
             XmlEvent::STag(stag) => match stag.name.as_ref() {
                 "i4" | "int" => {
                     let var = self.next_scalar_str()?;
@@ -516,7 +537,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 ))),
             },
             _ => Err(self.error(Reason::ValueExpected)),
-        }
+        }?;
+        self.expect_end("value")?;
+        Ok(res)
     }
 
     fn deserialize_identifier<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -575,7 +598,7 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
         &mut self,
         seed: K,
     ) -> Result<K::Value, Self::Error> {
-        let res = if let Some(value) = self.value.take() {
+        let res = if let Some(_value) = self.value.take() {
             todo!()
         } else {
             // <value>
@@ -584,7 +607,7 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
         };
 
         // </member>
-        self.de.expect_end()?;
+        self.de.expect_end("member")?;
 
         res
     }
@@ -598,44 +621,49 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
         K: de::DeserializeSeed<'de>,
         V: de::DeserializeSeed<'de>,
     {
-        self.de.next_start_name("member")?;
+        dbg!(self.de.reader.unparsed());
+        match self.de.next_ignore_whitespace()? {
+            XmlEvent::STag(e) if e.name() == "member" => {}
+            XmlEvent::ETag(e) => {
+                debug_assert_eq!(e.name(), "struct");
+                return Ok(None);
+            }
+            _ => return Err(self.de.error(Reason::ExpectedElement("`member`"))),
+        }
 
-        let res = match self.de.next_maybe_start()? {
-            Some(stag) if stag.name.as_ref() == "name" => {
+        let res = match self.de.next_start()? {
+            stag if stag.name.as_ref() == "name" => {
                 let name: K::Value = kseed.deserialize::<CowStrDeserializer<'de, Self::Error>>(
                     self.de.next_scalar_str()?.into_deserializer(),
                 )?;
 
-                let value: V::Value = if self.de.next_start()?.name.as_ref() == "value" {
-                    vseed.deserialize(&mut *self.de)?
+                if self.de.next_start()?.name.as_ref() == "value" {
+                    let value: V::Value = vseed.deserialize(&mut *self.de)?;
+                    Ok((name, value))
                 } else {
-                    return Err(self.de.error(Reason::ExpectedElement("value")));
-                };
-
-                Some((name, value))
+                    Err(self.de.error(Reason::ExpectedElement("`value`")))
+                }
             }
 
-            Some(stag) if stag.name.as_ref() == "value" => {
+            stag if stag.name.as_ref() == "value" => {
                 let value: V::Value = vseed.deserialize(&mut *self.de)?;
 
-                let name: K::Value = if self.de.next_start()?.name.as_ref() == "name" {
-                    kseed.deserialize::<CowStrDeserializer<'de, Self::Error>>(
+                if self.de.next_start()?.name.as_ref() == "name" {
+                    let name = kseed.deserialize::<CowStrDeserializer<'de, Self::Error>>(
                         self.de.next_scalar_str()?.into_deserializer(),
-                    )?
+                    )?;
+                    Ok((name, value))
                 } else {
-                    return Err(self.de.error(Reason::ExpectedElement("name")));
-                };
-
-                Some((name, value))
+                    Err(self.de.error(Reason::ExpectedElement("`name`")))
+                }
             }
 
-            None => None,
-            _ => return Err(self.de.error(Reason::ExpectedElement("name or value"))),
-        };
+            _ => Err(self.de.error(Reason::ExpectedElement("`name` or `value`"))),
+        }?;
 
-        self.de.expect_end()?;
+        self.de.expect_end("member")?;
 
-        Ok(res)
+        Ok(Some(res))
     }
 }
 
@@ -663,7 +691,7 @@ impl<'de, 'a> de::SeqAccess<'de> for ArrayDeserializer<'a, 'de> {
                 seed.deserialize(&mut *self.de).map(Some)
             }
             Ok(None) => {
-                self.de.expect_end()?;
+                self.de.expect_end("value")?;
                 Ok(None)
             }
             _ => return Err(self.de.error(Reason::ExpectedElement("value"))),
@@ -758,16 +786,16 @@ impl<'a, 'de> de::Deserializer<'de> for ParamsDeserializer<'a, 'de> {
 
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         Err(self.de.error(Reason::RootStruct))
     }
 
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
-        self.de.expect_end()?;
+        self.de.expect_end("params")?;
         visitor.visit_unit()
     }
 
@@ -777,7 +805,7 @@ impl<'a, 'de> de::Deserializer<'de> for ParamsDeserializer<'a, 'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         self.deserialize_unit(visitor)
     }
@@ -788,21 +816,21 @@ impl<'a, 'de> de::Deserializer<'de> for ParamsDeserializer<'a, 'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         self.deserialize_seq(visitor)
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         visitor.visit_seq(ParamsSeqDeserializer::new(self.de))
     }
 
     fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         self.deserialize_seq(visitor)
     }
@@ -814,19 +842,19 @@ impl<'a, 'de> de::Deserializer<'de> for ParamsDeserializer<'a, 'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         self.deserialize_seq(visitor)
     }
 
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
-        visitor: V,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        _visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>,
+        V: de::Visitor<'de>,
     {
         todo!()
     }
@@ -855,15 +883,20 @@ impl<'de, 'a> de::SeqAccess<'de> for ParamsSeqDeserializer<'a, 'de> {
         &mut self,
         seed: T,
     ) -> Result<Option<T::Value>, Error> {
-        match self.de.next_maybe_start() {
-            Ok(Some(stag)) if stag.name.as_ref() == "param" => {
+        dbg!(self.de.reader.unparsed());
+
+        match self.de.next_ignore_whitespace()? {
+            XmlEvent::STag(e) if e.name() == "param" => {
                 self.de.next_start_name("value")?;
                 let res = seed.deserialize(&mut *self.de)?;
-                self.de.expect_end()?;
+                self.de.expect_end("param")?;
                 Ok(Some(res))
             }
-            Ok(None) => Ok(None),
-            _ => return Err(self.de.error(Reason::ExpectedElement("param"))),
+            XmlEvent::ETag(e) => {
+                debug_assert_eq!(e.name(), "params");
+                Ok(None)
+            }
+            _ => Err(self.de.error(Reason::ExpectedElement("`param`"))),
         }
     }
 }
@@ -873,7 +906,7 @@ struct UnitDeserializer;
 impl<'de> de::Deserializer<'de> for UnitDeserializer {
     type Error = Error;
 
-    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+    fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         visitor.visit_unit()
     }
 
@@ -886,9 +919,11 @@ impl<'de> de::Deserializer<'de> for UnitDeserializer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::MethodCall;
     use std::collections::HashMap;
+
+    use crate::MethodCall;
+
+    use super::*;
 
     #[test]
     fn full_example_call() {
@@ -917,5 +952,136 @@ mod tests {
 
         let call: MethodCall<(i32, HashMap<String, String>, String)> =
             method_call_from_str(input).unwrap();
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("user-agent".to_string(), "xrs".to_string());
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "http.respond".into(),
+                params: (200, headers, "Hello!".to_string())
+            }
+        )
+    }
+
+    #[test]
+    fn empty_params_unit() {
+        let input = r#"<?xml version="1.0"?>
+            <methodCall>
+                <methodName>xmlrpc.echo</methodName>
+                <params>
+                </params>
+            </methodCall>"#;
+
+        let call: MethodCall<()> = method_call_from_str(input).unwrap();
+
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "xmlrpc.echo".into(),
+                params: ()
+            }
+        )
+    }
+
+    #[test]
+    fn nil_params_unit() {
+        let input = r#"<?xml version="1.0"?>
+            <methodCall>
+                <methodName>xmlrpc.echo</methodName>
+            </methodCall>"#;
+
+        let call: MethodCall<()> = method_call_from_str(input).unwrap();
+
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "xmlrpc.echo".into(),
+                params: ()
+            }
+        )
+    }
+
+    #[test]
+    fn empty_params_tuple() {
+        let input = r#"<?xml version="1.0"?>
+            <methodCall>
+                <methodName>xmlrpc.echo</methodName>
+                <params>
+                    <param><value><i4>1</i4></value></param>
+                    <param><value><i4>2</i4></value></param>
+                </params>
+            </methodCall>"#;
+
+        let call: MethodCall<(i32, i32)> = method_call_from_str(input).unwrap();
+
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "xmlrpc.echo".into(),
+                params: (1, 2)
+            }
+        )
+    }
+
+    #[test]
+    fn empty_params_seq() {
+        let input = r#"<?xml version="1.0"?>
+            <methodCall>
+                <methodName>xmlrpc.echo</methodName>
+                <params>
+                </params>
+            </methodCall>"#;
+
+        let call: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "xmlrpc.echo".into(),
+                params: vec![]
+            }
+        )
+    }
+
+    #[test]
+    fn nil_params_seq() {
+        let input = r#"<?xml version="1.0"?>
+            <methodCall>
+                <methodName>xmlrpc.echo</methodName>
+            </methodCall>"#;
+
+        let call: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "xmlrpc.echo".into(),
+                params: vec![]
+            }
+        )
+    }
+
+    #[test]
+    fn params_seq() {
+        let input = r#"<?xml version="1.0"?>
+            <methodCall>
+                <methodName>xmlrpc.echo</methodName>
+                <params>
+                    <param><value><i4>1</i4></value></param>
+                    <param><value><i4>2</i4></value></param>
+                    <param><value><i4>3</i4></value></param>
+                </params>
+            </methodCall>"#;
+
+        let call: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+
+        assert_eq!(
+            call,
+            MethodCall {
+                method_name: "xmlrpc.echo".into(),
+                params: vec![Value::Int(1), Value::Int(2), Value::Int(3)]
+            }
+        )
     }
 }

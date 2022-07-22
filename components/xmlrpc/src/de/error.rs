@@ -1,11 +1,8 @@
 use std::char::ParseCharError;
-use std::result::Result as StdResult;
-use std::str::Utf8Error;
-use std::{fmt, io};
-
-use serde::Deserializer;
-use serde::Serializer;
+use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
+use std::result::Result as StdResult;
+
 use xrs_parser::XmlError;
 
 /// Alias for a `Result` with the error type `serde_explicit_xml::Error`.
@@ -43,16 +40,10 @@ pub(crate) enum DeReason {
     Double(ParseFloatError),
     /// Xml parsing error
     Xml(XmlError),
-    /// Unexpected end of attributes
-    EndOfAttributes,
     /// Unexpected end of file
     Eof,
     /// Invalid value for a boolean
     InvalidBoolean(String),
-    /// Invalid unit value
-    InvalidUnit(String),
-    /// Invalid event for Enum
-    InvalidEnum(String),
     /// Invalid value for character
     InvalidChar(ParseCharError),
     /// Invalid value for NIL
@@ -65,19 +56,13 @@ pub(crate) enum DeReason {
     NoMarkupExpected,
     /// Expected XML-RPC value
     ValueExpected,
-    /// Expecting Text event
-    Text,
     /// Expecting Start event
     Start,
     /// Expecting End event
     End,
     ExpectedElement(&'static str),
-    /// Unsupported operation
-    Unsupported(&'static str),
     /// Expecting struct or tuple as root object
     RootStruct,
-    /// Expecting tag name
-    Tag(&'static str),
     /// Unknown type element
     UnknownType(String),
     /// Wrong type element
@@ -95,29 +80,17 @@ impl fmt::Display for DeReason {
             },
             DeReason::Int(e) => write!(f, "Invalid integer: {}", e),
             DeReason::Double(e) => write!(f, "Invalid float: {}", e),
-            DeReason::EndOfAttributes => write!(f, "Unexpected end of attributes"),
             DeReason::Eof => write!(f, "Unexpected end of file"),
             DeReason::InvalidBoolean(v) => write!(f, "Invalid boolean value '{}'", v),
-            DeReason::InvalidUnit(v) => {
-                write!(f, "Invalid unit value '{}', expected empty string", v)
-            }
             DeReason::InvalidNil(v) => {
                 write!(f, "Invalid NIL value '{}', expected empty string", v)
             }
             DeReason::InvalidChar(v) => write!(f, "Invalid char: {}", v),
-            DeReason::InvalidEnum(e) => write!(
-                f,
-                "Invalid event for Enum, expecting Text or Start, got: {:?}",
-                e
-            ),
-            DeReason::Text => write!(f, "Expecting Text event"),
             DeReason::Start => write!(f, "Expecting Start event"),
             DeReason::End => write!(f, "Expecting End event"),
-            DeReason::Unsupported(s) => write!(f, "Unsupported operation: {}", s),
             DeReason::NoMarkupExpected => write!(f, "Expecting only characters in scalar"),
             DeReason::ValueExpected => write!(f, "Expecting XML-RPC value"),
             DeReason::RootStruct => write!(f, "Can only deserialize struct on root level"),
-            DeReason::Tag(tag) => write!(f, "Expecting start tag '{}'", tag),
             DeReason::UnknownType(ty) => write!(f, "Unknown type element <{}>", ty),
             DeReason::WrongType(expected, actual) => {
                 write!(f, "Expected type {}, but got {}", expected, actual)

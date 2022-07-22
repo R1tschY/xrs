@@ -1,17 +1,10 @@
-use crate::value::Value;
 use std::borrow::Cow;
+use std::fmt;
+use std::fmt::Formatter;
 
 pub mod de;
 pub mod ser;
 pub mod value;
-
-pub trait DeserializeParams {
-    fn deserialize() -> Self;
-}
-
-pub trait SerializeParams {
-    fn serialize() -> Self;
-}
 
 pub struct MethodCall<'a, T> {
     method_name: Cow<'a, str>,
@@ -19,9 +12,9 @@ pub struct MethodCall<'a, T> {
 }
 
 impl<'a, T> MethodCall<'a, T> {
-    pub fn new(method_name: Cow<'a, str>, params: T) -> Self {
+    pub fn new(method_name: impl Into<Cow<'a, str>>, params: T) -> Self {
         Self {
-            method_name,
+            method_name: method_name.into(),
             params,
         }
     }
@@ -63,10 +56,28 @@ where
     }
 }
 
-#[derive(Clone, PartialEq)]
+impl<'a, T> fmt::Debug for MethodCall<'a, T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MethodCall")
+            .field("method_name", &self.method_name)
+            .field("params", &self.params)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
 pub struct Fault<'a> {
     fault_code: i32,
     fault_string: Cow<'a, str>,
+}
+
+#[derive(Debug)]
+pub enum MethodResponses<'a> {
+    Success(String),
+    Fault(Fault<'a>),
 }
 
 pub enum MethodResponse<'a, T> {
@@ -98,6 +109,18 @@ where
             MethodResponse::Fault(f1) => {
                 matches!(other, MethodResponse::Fault(f2) if f1 == f2)
             }
+        }
+    }
+}
+
+impl<'a, T> fmt::Debug for MethodResponse<'a, T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            MethodResponse::Success(success) => f.debug_tuple("Success").field(success).finish(),
+            MethodResponse::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
         }
     }
 }
