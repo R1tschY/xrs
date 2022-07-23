@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use quick_xml::events::Event as QXEvent;
 use quick_xml::Reader as QXReader;
-use std::borrow::Cow;
-use std::collections::HashMap;
 use xml::reader::{EventReader as XReader, XmlEvent as XEvent};
-use xml_parser::{Reader, XmlEvent};
+
+use xrs_parser::{Reader, XmlEvent};
 
 fn parse_using_quick_xml(input: &[u8]) -> (HashMap<Cow<str>, usize>, HashMap<Cow<str>, usize>) {
     let mut buf = Vec::new();

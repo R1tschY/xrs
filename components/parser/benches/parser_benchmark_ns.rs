@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use quick_xml::events::Event as QXEvent;
 use quick_xml::Reader as QXReader;
-use std::collections::HashMap;
 use xml::reader::{EventReader as XReader, XmlEvent as XEvent};
-use xml_parser::{NsReader, XmlNsEvent};
+
+use xrs_parser::{NsReader, XmlNsEvent};
 
 fn from_utf8(i: &[u8]) -> String {
     std::str::from_utf8(i).unwrap().to_string()

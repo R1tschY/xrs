@@ -1,11 +1,13 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::arch::x86_64::{
     __m128i, _mm_and_si128, _mm_cmpeq_epi8, _mm_load_si128, _mm_loadu_si128, _mm_movemask_epi8,
     _mm_set1_epi8, _mm_setr_epi8, _mm_shuffle_epi8, _mm_srl_epi32, _mm_srli_epi32,
 };
-use xml_chars::XmlAsciiChar;
-use xml_parser::parser::cursor::Cursor;
-use xml_parser::XmlError;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+use xrs_chars::XmlAsciiChar;
+use xrs_parser::parser::cursor::Cursor;
+use xrs_parser::XmlError;
 
 fn take_while(cursor: Cursor) -> Result<((), Cursor), XmlError> {
     let size = cursor
