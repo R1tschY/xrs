@@ -26,6 +26,7 @@ pub struct Deserializer<'a> {
 
 pub fn value_from_str<'de, T: Deserialize<'de>>(s: &'de str) -> Result<T, Error> {
     let mut de = Deserializer::new(Reader::new(s));
+    de.next_start_name("value")?;
     T::deserialize(&mut de)
 }
 
@@ -85,15 +86,12 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
         }
     }
 
-    let method_name = method_name.ok_or_else(|| {
-        de.error(Reason::Message(
-            "element is missing: `methodName`".to_string(),
-        ))
-    })?;
+    let method_name = method_name
+        .ok_or_else(|| de.error(Reason::Message("missing element: `methodName`".to_string())))?;
 
     let params = match params {
         Some(params) => params,
-        None => T::deserialize(UnitDeserializer)?,
+        None => return Err(de.error(DeReason::Message("missing element: `params`".to_string()))),
     };
 
     Ok(MethodCall::new(method_name, params))
@@ -901,25 +899,11 @@ impl<'de, 'a> de::SeqAccess<'de> for ParamsSeqDeserializer<'a, 'de> {
     }
 }
 
-struct UnitDeserializer;
-
-impl<'de> de::Deserializer<'de> for UnitDeserializer {
-    type Error = Error;
-
-    fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_unit()
-    }
-
-    forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf option unit unit_struct newtype_struct seq tuple
-        tuple_struct map struct enum identifier ignored_any
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+
+    use serde::Deserialize;
 
     use crate::MethodCall;
 
@@ -964,124 +948,382 @@ mod tests {
         )
     }
 
-    #[test]
-    fn empty_params_unit() {
-        let input = r#"<?xml version="1.0"?>
-            <methodCall>
-                <methodName>xmlrpc.echo</methodName>
-                <params>
-                </params>
-            </methodCall>"#;
+    mod params_unit {
+        use super::*;
 
-        let call: MethodCall<()> = method_call_from_str(input).unwrap();
+        #[test]
+        fn empty_params_unit() {
+            let input = r#"<?xml version="1.0"?>
+                <methodCall>
+                    <methodName>xmlrpc.echo</methodName>
+                    <params>
+                    </params>
+                </methodCall>"#;
 
-        assert_eq!(
-            call,
-            MethodCall {
-                method_name: "xmlrpc.echo".into(),
-                params: ()
-            }
-        )
+            let actual: MethodCall<()> = method_call_from_str(input).unwrap();
+
+            assert_eq!(
+                actual,
+                MethodCall {
+                    method_name: "xmlrpc.echo".into(),
+                    params: ()
+                }
+            )
+        }
     }
 
-    #[test]
-    fn nil_params_unit() {
-        let input = r#"<?xml version="1.0"?>
-            <methodCall>
-                <methodName>xmlrpc.echo</methodName>
-            </methodCall>"#;
+    mod params_tuple {
+        use super::*;
 
-        let call: MethodCall<()> = method_call_from_str(input).unwrap();
+        #[test]
+        fn empty_params_tuple() {
+            let input = r#"<?xml version="1.0"?>
+                <methodCall>
+                    <methodName>xmlrpc.echo</methodName>
+                    <params>
+                        <param><value><i4>1</i4></value></param>
+                        <param><value><i4>2</i4></value></param>
+                    </params>
+                </methodCall>"#;
 
-        assert_eq!(
-            call,
-            MethodCall {
-                method_name: "xmlrpc.echo".into(),
-                params: ()
-            }
-        )
+            let actual: MethodCall<(i32, i32)> = method_call_from_str(input).unwrap();
+
+            assert_eq!(
+                actual,
+                MethodCall {
+                    method_name: "xmlrpc.echo".into(),
+                    params: (1, 2)
+                }
+            )
+        }
     }
 
-    #[test]
-    fn empty_params_tuple() {
-        let input = r#"<?xml version="1.0"?>
-            <methodCall>
-                <methodName>xmlrpc.echo</methodName>
-                <params>
-                    <param><value><i4>1</i4></value></param>
-                    <param><value><i4>2</i4></value></param>
-                </params>
-            </methodCall>"#;
+    mod params_seq {
+        use super::*;
 
-        let call: MethodCall<(i32, i32)> = method_call_from_str(input).unwrap();
+        #[test]
+        fn empty_params_seq() {
+            let input = r#"<?xml version="1.0"?>
+                <methodCall>
+                    <methodName>xmlrpc.echo</methodName>
+                    <params>
+                    </params>
+                </methodCall>"#;
 
-        assert_eq!(
-            call,
-            MethodCall {
-                method_name: "xmlrpc.echo".into(),
-                params: (1, 2)
-            }
-        )
+            let actual: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+
+            assert_eq!(
+                actual,
+                MethodCall {
+                    method_name: "xmlrpc.echo".into(),
+                    params: vec![]
+                }
+            )
+        }
+
+        #[test]
+        fn params_seq() {
+            let input = r#"<?xml version="1.0"?>
+                    <methodCall>
+                        <methodName>xmlrpc.echo</methodName>
+                        <params>
+                            <param><value><i4>1</i4></value></param>
+                            <param><value><i4>2</i4></value></param>
+                            <param><value><i4>3</i4></value></param>
+                        </params>
+                    </methodCall>"#;
+
+            let actual: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+
+            assert_eq!(
+                actual,
+                MethodCall {
+                    method_name: "xmlrpc.echo".into(),
+                    params: vec![Value::Int(1), Value::Int(2), Value::Int(3)]
+                }
+            )
+        }
     }
 
-    #[test]
-    fn empty_params_seq() {
-        let input = r#"<?xml version="1.0"?>
-            <methodCall>
-                <methodName>xmlrpc.echo</methodName>
-                <params>
-                </params>
-            </methodCall>"#;
+    mod int_value {
+        use super::*;
 
-        let call: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+        #[test]
+        fn i4() {
+            let input = r#"<value><i4>1</i4></value>"#;
 
-        assert_eq!(
-            call,
-            MethodCall {
-                method_name: "xmlrpc.echo".into(),
-                params: vec![]
-            }
-        )
+            let actual: i32 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, 1)
+        }
+
+        #[test]
+        fn int() {
+            let input = r#"<value><int>1</int></value>"#;
+
+            let actual: i32 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, 1)
+        }
+
+        #[test]
+        fn plus() {
+            let input = r#"<value><int>+1</int></value>"#;
+
+            let actual: i32 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, 1)
+        }
+
+        #[test]
+        fn minus() {
+            let input = r#"<value><int>-1</int></value>"#;
+
+            let actual: i32 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, -1)
+        }
+
+        #[test]
+        fn leading_zeros() {
+            let input = r#"<value><int>-00000009</int></value>"#;
+
+            let actual: i32 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, -9)
+        }
     }
 
-    #[test]
-    fn nil_params_seq() {
-        let input = r#"<?xml version="1.0"?>
-            <methodCall>
-                <methodName>xmlrpc.echo</methodName>
-            </methodCall>"#;
+    mod string_value {
+        use super::*;
 
-        let call: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+        #[test]
+        fn string() {
+            let input = r#"<value><string>abc</string></value>"#;
 
-        assert_eq!(
-            call,
-            MethodCall {
-                method_name: "xmlrpc.echo".into(),
-                params: vec![]
-            }
-        )
+            let actual: String = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "abc".to_string())
+        }
+
+        #[test]
+        fn borrowed_string() {
+            let input = r#"<value><string>abc</string></value>"#;
+
+            let actual: &str = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "abc")
+        }
+
+        #[test]
+        fn whitespace() {
+            let input = "<value><string> \t\n</string></value>";
+
+            let actual: &str = value_from_str(input).unwrap();
+
+            assert_eq!(actual, " \t\n")
+        }
     }
 
-    #[test]
-    fn params_seq() {
-        let input = r#"<?xml version="1.0"?>
-            <methodCall>
-                <methodName>xmlrpc.echo</methodName>
-                <params>
-                    <param><value><i4>1</i4></value></param>
-                    <param><value><i4>2</i4></value></param>
-                    <param><value><i4>3</i4></value></param>
-                </params>
-            </methodCall>"#;
+    mod boolean_value {
+        use super::*;
 
-        let call: MethodCall<Vec<Value>> = method_call_from_str(input).unwrap();
+        #[test]
+        fn true_() {
+            let input = r#"<value><boolean>1</boolean></value>"#;
 
-        assert_eq!(
-            call,
-            MethodCall {
-                method_name: "xmlrpc.echo".into(),
-                params: vec![Value::Int(1), Value::Int(2), Value::Int(3)]
-            }
-        )
+            let actual: bool = value_from_str(input).unwrap();
+
+            assert_eq!(actual, true)
+        }
+
+        #[test]
+        fn false_() {
+            let input = r#"<value><boolean>0</boolean></value>"#;
+
+            let actual: bool = value_from_str(input).unwrap();
+
+            assert_eq!(actual, false)
+        }
     }
+
+    mod double_value {
+        use super::*;
+
+        #[test]
+        fn integer() {
+            let input = r#"<value><double>1</double></value>"#;
+
+            let actual: f64 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, 1.0)
+        }
+
+        #[test]
+        fn double() {
+            let input = r#"<value><double>+0.1234</double></value>"#;
+
+            let actual: f64 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, 0.1234)
+        }
+
+        #[test]
+        fn float() {
+            let input = r#"<value><double>+0.1234</double></value>"#;
+
+            let actual: f32 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, 0.1234)
+        }
+    }
+
+    mod struct_value {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            #[derive(Deserialize, PartialEq, Debug)]
+            struct Struct {};
+
+            let input = r#"<value><struct></struct></value>"#;
+
+            let actual: Struct = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Struct {})
+        }
+
+        #[test]
+        fn one_member() {
+            #[derive(Deserialize, PartialEq, Debug)]
+            struct Struct {
+                _1: i32,
+            };
+
+            let input = r#"
+                <value>
+                    <struct>
+                        <member>
+                            <name>_1</name>
+                            <value><int>1</int></value>
+                        </member>
+                    </struct>
+                </value>"#;
+
+            let actual: Struct = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Struct { _1: 1 })
+        }
+
+        #[test]
+        fn two_member() {
+            #[derive(Deserialize, PartialEq, Debug)]
+            struct Struct {
+                _1: i32,
+                _2: i32,
+            };
+
+            let input = r#"
+                <value>
+                    <struct>
+                        <member>
+                            <name>_1</name>
+                            <value><int>1</int></value>
+                        </member>
+                        <member>
+                            <name>_2</name>
+                            <value><int>2</int></value>
+                        </member>
+                    </struct>
+                </value>"#;
+
+            let actual: Struct = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Struct { _1: 1, _2: 2 })
+        }
+
+        #[test]
+        fn nested() {
+            #[derive(Deserialize, PartialEq, Debug)]
+            struct Struct1 {
+                inner: Struct2,
+            };
+            #[derive(Deserialize, PartialEq, Debug)]
+            struct Struct2 {};
+
+            let input = r#"
+                <value>
+                    <struct>
+                        <member>
+                            <name>inner</name>
+                            <value>
+                                <struct></struct>
+                            </value>
+                        </member>
+                    </struct>
+                </value>"#;
+
+            let actual: Struct1 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Struct1 { inner: Struct2 {} })
+        }
+    }
+
+    mod map_value {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            let input = r#"<value><struct></struct></value>"#;
+
+            let actual: HashMap<String, Value> = value_from_str(input).unwrap();
+
+            assert_eq!(actual, HashMap::new())
+        }
+
+        #[test]
+        fn one_member() {
+            let input = r#"
+                <value>
+                    <struct>
+                        <member>
+                            <name>_1</name>
+                            <value><int>1</int></value>
+                        </member>
+                    </struct>
+                </value>"#;
+
+            let actual: HashMap<String, Value> = value_from_str(input).unwrap();
+
+            let mut expected = HashMap::new();
+            expected.insert("_1".to_string(), Value::Int(1));
+            assert_eq!(actual, expected)
+        }
+
+        #[test]
+        fn two_member() {
+            let input = r#"
+                <value>
+                    <struct>
+                        <member>
+                            <name>_1</name>
+                            <value><int>1</int></value>
+                        </member>
+                        <member>
+                            <name>_2</name>
+                            <value><int>2</int></value>
+                        </member>
+                    </struct>
+                </value>"#;
+
+            let actual: HashMap<String, Value> = value_from_str(input).unwrap();
+
+            let mut expected = HashMap::new();
+            expected.insert("_1".to_string(), Value::Int(1));
+            expected.insert("_2".to_string(), Value::Int(2));
+            assert_eq!(actual, expected)
+        }
+    }
+
+    // TODO: tuple, vec, enum
 }
