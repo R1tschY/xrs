@@ -59,7 +59,7 @@ pub(crate) enum DeReason {
     /// Expecting Start event
     Start,
     /// Expecting End event
-    End,
+    ExpectedEndElement(&'static str),
     ExpectedElement(&'static str),
     /// Expecting struct or tuple as root object
     RootStruct,
@@ -87,7 +87,7 @@ impl fmt::Display for DeReason {
             }
             DeReason::InvalidChar(v) => write!(f, "Invalid char: {}", v),
             DeReason::Start => write!(f, "Expecting Start event"),
-            DeReason::End => write!(f, "Expecting End event"),
+            DeReason::ExpectedEndElement(name) => write!(f, "Expecting end of element `{}`", name),
             DeReason::NoMarkupExpected => write!(f, "Expecting only characters in scalar"),
             DeReason::ValueExpected => write!(f, "Expecting XML-RPC value"),
             DeReason::RootStruct => write!(f, "Can only deserialize struct on root level"),

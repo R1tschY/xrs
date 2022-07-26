@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Formatter;
 
+use serde::{Deserialize, Serialize};
+
 pub mod de;
 pub mod ser;
 pub mod value;
@@ -68,10 +70,21 @@ where
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct Fault<'a> {
+    #[serde(rename = "faultCode")]
     fault_code: i32,
+    #[serde(rename = "faultString")]
     fault_string: Cow<'a, str>,
+}
+
+impl<'a> Fault<'a> {
+    pub fn into_owned(self) -> Fault<'static> {
+        Fault {
+            fault_code: self.fault_code,
+            fault_string: self.fault_string.into_owned().into(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -83,6 +96,15 @@ pub enum MethodResponses<'a> {
 pub enum MethodResponse<'a, T> {
     Success(T),
     Fault(Fault<'a>),
+}
+
+impl<'a, T> MethodResponse<'a, T> {
+    pub fn into_owned(self) -> MethodResponse<'static, T> {
+        match self {
+            MethodResponse::Success(success) => MethodResponse::Success(success),
+            MethodResponse::Fault(fault) => MethodResponse::Fault(fault.into_owned()),
+        }
+    }
 }
 
 impl<'a, T> Clone for MethodResponse<'a, T>

@@ -14,7 +14,7 @@ use xrs_parser::{Reader, STag, XmlEvent, XmlNsEvent};
 use crate::de::cow::{CowStrExt, StrExt};
 use crate::de::error::{DeError as Error, DeReason as Reason, DeReason};
 use crate::value::Value;
-use crate::MethodCall;
+use crate::{Fault, MethodCall, MethodResponse};
 
 mod cow;
 mod error;
@@ -47,10 +47,8 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
     let mut params: Option<T> = None;
 
     loop {
-        match de.peek()? {
+        match de.next()? {
             XmlEvent::STag(stag) if stag.name() == "methodName" => {
-                de.eat_peek();
-
                 if method_name.is_none() {
                     method_name = Some(de.next_scalar_str()?);
                 } else {
@@ -60,8 +58,6 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
                 }
             }
             XmlEvent::STag(stag) if stag.name() == "params" => {
-                de.eat_peek();
-
                 if params.is_none() {
                     params = Some(T::deserialize(ParamsDeserializer { de: &mut de })?);
                 } else {
@@ -70,19 +66,9 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
                     );
                 }
             }
-            XmlEvent::STag(_) => {
-                return Err(de.error(DeReason::ExpectedElement("methodName or params")));
-            }
-            XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace() => {
-                return Err(de.error(DeReason::Start));
-            }
-            XmlEvent::ETag(_) => {
-                de.eat_peek();
-                break;
-            }
-            _ => {
-                de.eat_peek();
-            }
+            XmlEvent::ETag(_) => break,
+            e if is_ignorable(&e) => continue,
+            _ => return Err(de.error(DeReason::ExpectedElement("`methodName` or `params`"))),
         }
     }
 
@@ -94,6 +80,8 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
         None => return Err(de.error(DeReason::Message("missing element: `params`".to_string()))),
     };
 
+    de.expect_end("methodCall")?;
+
     Ok(MethodCall::new(method_name, params))
 }
 
@@ -103,6 +91,54 @@ pub fn method_call_from_reader<R: BufRead, T: DeserializeOwned>(
     let mut buf = String::new();
     reader.read_to_string(&mut buf)?;
     method_call_from_str(&buf).map(|ok| ok.into_owned())
+}
+
+pub fn method_response_from_str<'de, T: Deserialize<'de>>(
+    s: &'de str,
+) -> Result<MethodResponse<'de, T>, Error> {
+    let mut de = Deserializer::new(Reader::new(s));
+
+    de.next_start_name("methodResponse")?;
+
+    let res = loop {
+        match de.next()? {
+            XmlEvent::STag(stag) if stag.name() == "params" => {
+                de.next_start_name("param")?;
+                de.next_start_name("value")?;
+                let response = MethodResponse::Success(T::deserialize(&mut de)?);
+                de.expect_end("param")?;
+                de.expect_end("params")?;
+                break response;
+            }
+            XmlEvent::STag(stag) if stag.name() == "fault" => {
+                de.next_start_name("value")?;
+                let response = MethodResponse::Fault(Fault::deserialize(&mut de)?);
+                de.expect_end("fault")?;
+                break response;
+            }
+            e if is_ignorable(&e) => continue,
+            _ => return Err(de.error(DeReason::ExpectedElement("`params` or `fault`"))),
+        }
+    };
+
+    de.expect_end("methodResponse")?;
+    Ok(res)
+}
+
+pub fn method_response_from_reader<R: BufRead, T: DeserializeOwned>(
+    mut reader: R,
+) -> Result<MethodResponse<'static, T>, Error> {
+    let mut buf = String::new();
+    reader.read_to_string(&mut buf)?;
+    method_response_from_str(&buf).map(|ok| ok.into_owned())
+}
+
+fn is_ignorable(evt: &XmlEvent) -> bool {
+    match evt {
+        XmlEvent::STag(_) | XmlEvent::ETag(_) => false,
+        XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace() => false,
+        _ => true,
+    }
 }
 
 impl<'a> Deserializer<'a> {
@@ -172,8 +208,8 @@ impl<'a> Deserializer<'a> {
     }
 
     fn next_start_name(&mut self, name: &'static str) -> Result<STag<'a>, Error> {
-        match self.next_start() {
-            Ok(stag) if stag.name.as_ref() == name => Ok(stag),
+        match self.next_ignore_whitespace()? {
+            XmlEvent::STag(e) if e.name.as_ref() == name => Ok(e),
             _ => Err(self.error(Reason::ExpectedElement(name))),
         }
     }
@@ -204,7 +240,7 @@ impl<'a> Deserializer<'a> {
                 debug_assert_eq!(etag.name(), name);
                 Ok(())
             }
-            _ => Err(self.error(Reason::End)),
+            _ => Err(self.error(Reason::ExpectedEndElement(name))),
         }
     }
 
@@ -576,7 +612,14 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
         seed: K,
     ) -> Result<Option<K::Value>, Self::Error> {
         // <member>
-        self.de.next_start_name("member")?;
+        match self.de.next_ignore_whitespace()? {
+            XmlEvent::STag(e) if e.name() == "member" => {}
+            XmlEvent::ETag(e) => {
+                debug_assert_eq!(e.name(), "struct");
+                return Ok(None);
+            }
+            _ => return Err(self.de.error(Reason::ExpectedElement("`member`"))),
+        }
 
         match self.de.next_maybe_start()? {
             // <name>
@@ -619,7 +662,6 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
         K: de::DeserializeSeed<'de>,
         V: de::DeserializeSeed<'de>,
     {
-        dbg!(self.de.reader.unparsed());
         match self.de.next_ignore_whitespace()? {
             XmlEvent::STag(e) if e.name() == "member" => {}
             XmlEvent::ETag(e) => {
@@ -1045,6 +1087,59 @@ mod tests {
         }
     }
 
+    mod response {
+        use super::*;
+
+        #[test]
+        fn success() {
+            let input = r#"<?xml version="1.0"?>
+                <methodResponse>
+                    <params>
+                        <param>
+                            <value>
+                                <string>42</string>
+                            </value>
+                        </param>
+                    </params>
+                </methodResponse>"#;
+
+            let response: MethodResponse<String> = method_response_from_str(input).unwrap();
+
+            assert_eq!(response, MethodResponse::Success("42".to_string()))
+        }
+
+        #[test]
+        fn fault() {
+            let input = r#"<?xml version="1.0"?>
+                <methodResponse>
+                    <fault>
+                        <value>
+                            <struct>
+                                <member>
+                                    <name>faultCode</name>
+                                    <value><int>128</int></value>
+                                </member>
+                                <member>
+                                    <name>faultString</name>
+                                    <value><string>something failed</string></value>
+                                </member>
+                            </struct>
+                        </value>
+                    </fault>
+                </methodResponse>"#;
+
+            let response: MethodResponse<String> = method_response_from_str(input).unwrap();
+
+            assert_eq!(
+                response,
+                MethodResponse::Fault(Fault {
+                    fault_code: 128,
+                    fault_string: "something failed".into()
+                })
+            )
+        }
+    }
+
     mod int_value {
         use super::*;
 
@@ -1325,5 +1420,5 @@ mod tests {
         }
     }
 
-    // TODO: tuple, vec, enum
+    // TODO: tuple, vec, enum value
 }
