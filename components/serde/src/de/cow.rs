@@ -1,12 +1,13 @@
 use std::borrow::Cow;
+
 use xrs_chars::XmlAsciiChar;
 
 pub(crate) trait CowStrExt<'a> {
     fn push_str(&mut self, string: &str);
-    fn trim_matches<P>(&mut self, p: P)
+    fn trim_matches_inplace<P>(&mut self, p: P)
     where
         P: Fn(char) -> bool;
-    fn tail(&mut self, i: usize);
+    fn tail_inplace(&mut self, i: usize);
 }
 
 fn string_trim_matches(s: &mut String, p: impl Fn(char) -> bool) {
@@ -30,7 +31,7 @@ impl<'a> CowStrExt<'a> for Cow<'a, str> {
         }
     }
 
-    fn trim_matches<P>(&mut self, p: P)
+    fn trim_matches_inplace<P>(&mut self, p: P)
     where
         P: Fn(char) -> bool,
     {
@@ -42,7 +43,7 @@ impl<'a> CowStrExt<'a> for Cow<'a, str> {
         }
     }
 
-    fn tail(&mut self, i: usize) {
+    fn tail_inplace(&mut self, i: usize) {
         match self {
             Cow::Borrowed(borrowed) => {
                 *self = Cow::Borrowed(&borrowed[i..]);

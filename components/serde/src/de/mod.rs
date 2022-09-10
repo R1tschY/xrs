@@ -232,7 +232,7 @@ impl<'a> Deserializer<'a> {
 
     fn next_trimmed_text(&mut self) -> Result<Cow<'a, str>, Error> {
         let mut text = self.next_text()?;
-        text.trim_matches(|c: char| c.is_xml_whitespace());
+        text.trim_matches_inplace(|c: char| c.is_xml_whitespace());
         Ok(text)
     }
 
@@ -443,10 +443,13 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     }
 
     fn deserialize_ignored_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        match self.next()? {
-            XmlEvent::STag(_) => self.read_to_end()?,
-            XmlEvent::ETag(_) => return Err(self.error(Reason::End)),
-            _ => (),
+        let mut depth = 1;
+        while depth >= 0 {
+            match self.next()? {
+                XmlEvent::STag(_) => depth += 1,
+                XmlEvent::ETag(_) => depth -= 1,
+                _ => {}
+            }
         }
         visitor.visit_unit().map_err(|err| self.fix_position(err))
     }
