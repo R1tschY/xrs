@@ -1,9 +1,11 @@
+use std::fmt::{Debug, Write};
+
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::{Error, Reader};
 use serde::de::Unexpected::Str;
-use std::fmt::{Debug, Write};
-use xml_xts::TestableParser;
-use xml_xts::XmlTester;
+
+use xrs_xts::TestableParser;
+use xrs_xts::XmlTester;
 
 struct QuickXmlIT;
 
@@ -133,7 +135,7 @@ impl QuickXmlIT {
 }
 
 impl TestableParser for QuickXmlIT {
-    fn is_wf(&self, input: &[u8], namespace: bool) -> bool {
+    fn check_well_formed(&self, input: &[u8], namespace: bool) -> Result<(), (String, usize)> {
         let mut reader = Reader::from_reader(input);
         reader.trim_text(false);
         reader.check_comments(true);
@@ -144,35 +146,35 @@ impl TestableParser for QuickXmlIT {
             let mut ns_buf = Vec::new();
             loop {
                 match reader.read_namespaced_event(&mut buf, &mut ns_buf) {
-                    Ok((_, Event::Eof)) => return true,
+                    Ok((_, Event::Eof)) => return Ok(()),
                     Ok((ns, Event::Start(start))) => {
                         if start
                             .attributes()
                             .with_checks(true)
                             .any(|attr| attr.is_err())
                         {
-                            return false;
+                            return Err(("".to_string(), 0));
                         }
                     }
                     Ok(_) => buf.clear(),
-                    Err(_) => return false,
+                    Err(err) => return Err((format!("{:?}", err), 0)),
                 }
             }
         } else {
             loop {
                 match reader.read_event(&mut buf) {
-                    Ok(Event::Eof) => return true,
+                    Ok(Event::Eof) => return Ok(()),
                     Ok(Event::Start(start)) => {
                         if start
                             .attributes()
                             .with_checks(true)
                             .any(|attr| attr.is_err())
                         {
-                            return false;
+                            return Err(("".to_string(), 0));
                         }
                     }
                     Ok(_) => buf.clear(),
-                    Err(_) => return false,
+                    Err(err) => return Err((format!("{:?}", err), 0)),
                 }
             }
         }
