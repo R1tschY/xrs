@@ -22,6 +22,7 @@ mod namespace;
 pub mod parser;
 mod reader;
 mod shufti;
+mod simple;
 
 /// XML Declaration
 #[derive(Clone, Debug, PartialEq)]
@@ -149,7 +150,7 @@ impl<'a> ETag<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PI<'a> {
     pub target: Cow<'a, str>,
-    pub data: Cow<'a, str>,
+    pub data: Option<Cow<'a, str>>,
 }
 
 impl<'a> PI<'a> {
@@ -157,14 +158,14 @@ impl<'a> PI<'a> {
         &self.target
     }
 
-    pub fn data(&self) -> &str {
-        &self.data
+    pub fn data(&self) -> Option<&str> {
+        self.data.as_ref().map(|s| s as &str)
     }
 
     pub fn into_owned(self) -> PI<'static> {
         PI {
-            target: self.target.into_owned().into(),
-            data: self.data.into_owned().into(),
+            target: Cow::Owned(self.target.into_owned()),
+            data: self.data.map(|d| Cow::Owned(d.into_owned())),
         }
     }
 }
@@ -222,10 +223,10 @@ impl<'a> XmlEvent<'a> {
         XmlEvent::Comment(comment.into())
     }
 
-    pub fn pi(target: impl Into<Cow<'a, str>>, data: impl Into<Cow<'a, str>>) -> Self {
+    pub fn pi(target: impl Into<Cow<'a, str>>, data: Option<Cow<'a, str>>) -> Self {
         XmlEvent::PI(PI {
             target: target.into(),
-            data: data.into(),
+            data,
         })
     }
 
@@ -242,6 +243,17 @@ impl<'a> XmlEvent<'a> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum XmlErrorAtom {
+    XmlDecl,
+    CData,
+    Comment,
+    PI,
+    Markup,
+    Element,
+    Whitespace,
+}
+
 /// Fatal parsing error
 #[derive(Debug, PartialEq)]
 pub enum XmlError {
@@ -253,13 +265,14 @@ pub enum XmlError {
     ExpectedAttrValue,
     ExpectedEquals,
     ExpectedDocumentEnd,
+    Expected(Box<[XmlErrorAtom]>),
     ExpectedWhitespace,
     WrongETagName {
         expected_name: String,
     },
     UnexpectedEof,
+    IllegalCDataSectionEnd,
     UnexpectedDtdEntry,
-    CDataEndInContent,
     ETagAfterRootElement,
     OpenElementAtEof,
     NonUniqueAttribute {
@@ -297,4 +310,5 @@ impl Error for XmlError {}
 #[derive(Debug, PartialEq)]
 pub enum XmlDtdError {
     SyntaxError,
+    Unsupported,
 }

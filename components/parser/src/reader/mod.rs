@@ -91,7 +91,7 @@ impl<'a, T: Fn(char) -> bool> Parser<'a> for CharTerminated<T> {
 ///
 ///     S ::= (#x20 | #x9 | #xD | #xA)+
 ///
-struct SToken;
+pub(crate) struct SToken;
 
 impl<'a> Parser<'a> for SToken {
     type Attribute = ();
@@ -111,7 +111,7 @@ impl<'a> Parser<'a> for SToken {
     }
 }
 
-struct NameToken;
+pub(crate) struct NameToken;
 
 impl<'a> Parser<'a> for NameToken {
     type Attribute = &'a str;
@@ -134,7 +134,7 @@ impl<'a> Parser<'a> for NameToken {
     }
 }
 
-struct AttValueToken;
+pub(crate) struct AttValueToken;
 
 impl<'a> Parser<'a> for AttValueToken {
     type Attribute = &'a str;
@@ -172,7 +172,7 @@ impl<'a> Parser<'a> for AttValueToken {
     }
 }
 
-struct EqLiteralToken;
+pub(crate) struct EqLiteralToken;
 
 impl<'a> Parser<'a> for EqLiteralToken {
     type Attribute = ();
@@ -189,7 +189,7 @@ impl<'a> Parser<'a> for EqLiteralToken {
 
 // 2.5 Comments
 
-struct CommentToken;
+pub(crate) struct CommentToken;
 
 impl<'a> Parser<'a> for CommentToken {
     type Attribute = &'a str;
@@ -210,10 +210,10 @@ impl<'a> Parser<'a> for CommentToken {
 /// Processing Instruction
 /// PI ::= '<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
 /// PITarget ::= Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
-struct PIToken;
+pub(crate) struct PIToken;
 
 impl<'a> Parser<'a> for PIToken {
-    type Attribute = PI<'a>;
+    type Attribute = (&'a str, Option<&'a str>);
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
@@ -225,13 +225,7 @@ impl<'a> Parser<'a> for PIToken {
         let (maybe_data, cursor) = optional((SToken, TerminatedChars("?>"))).parse(cursor)?;
         let (_, cursor) = xml_lit("?>").parse(cursor)?;
 
-        Ok((
-            PI {
-                target: Cow::Borrowed(target),
-                data: Cow::Borrowed(maybe_data.map(|data| data.1).unwrap_or("")),
-            },
-            cursor,
-        ))
+        Ok(((target, maybe_data.map(|data| data.1)), cursor))
     }
 }
 
@@ -243,7 +237,7 @@ impl<'a> Parser<'a> for PIToken {
 /// CDStart ::= '<![CDATA['
 /// CData   ::= (Char* - (Char* ']]>' Char*))
 /// CDEnd   ::= ']]>'
-struct CDataToken;
+pub(crate) struct CDataToken;
 
 impl<'a> Parser<'a> for CDataToken {
     type Attribute = &'a str;
@@ -259,7 +253,7 @@ impl<'a> Parser<'a> for CDataToken {
 
 // 2.8 Prolog and Document Type Declaration
 
-struct XmlDeclToken;
+pub(crate) struct XmlDeclToken;
 
 impl<'a> Parser<'a> for XmlDeclToken {
     type Attribute = XmlDecl;
@@ -284,7 +278,7 @@ impl<'a> Parser<'a> for XmlDeclToken {
     }
 }
 
-struct VersionInfoToken;
+pub(crate) struct VersionInfoToken;
 
 impl<'a> Parser<'a> for VersionInfoToken {
     type Attribute = &'a str;
@@ -312,7 +306,7 @@ impl<'a> Parser<'a> for VersionInfoToken {
     }
 }
 
-struct EqToken;
+pub(crate) struct EqToken;
 
 impl<'a> Parser<'a> for EqToken {
     type Attribute = ();
@@ -326,7 +320,7 @@ impl<'a> Parser<'a> for EqToken {
     }
 }
 
-struct VersionNumToken;
+pub(crate) struct VersionNumToken;
 
 impl<'a> Parser<'a> for VersionNumToken {
     type Attribute = &'a str;
@@ -343,7 +337,7 @@ impl<'a> Parser<'a> for VersionNumToken {
 
 // 2.9 Standalone Document Declaration
 
-struct SDDeclToken;
+pub(crate) struct SDDeclToken;
 
 impl<'a> Parser<'a> for SDDeclToken {
     type Attribute = bool;
@@ -389,7 +383,7 @@ impl<'a> Parser<'a> for SDDeclToken {
 /// Character Reference
 ///
 /// `CharRef ::= '&#' [0-9]+ ';' | '&#x' [0-9a-fA-F]+ ';'`
-struct CharRefToken;
+pub(crate) struct CharRefToken;
 
 fn take_till_ascii_char(
     cursor: Cursor,
@@ -409,7 +403,7 @@ fn take_till_ascii_char(
 }
 
 impl<'a> Parser<'a> for CharRefToken {
-    type Attribute = String;
+    type Attribute = char;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), XmlError> {
@@ -429,7 +423,7 @@ impl<'a> Parser<'a> for CharRefToken {
             .ok()
             .and_then(|code| char::try_from(code).ok())
             .filter(|c| c.is_xml_char())
-            .map(move |c| (c.to_string(), cursor.advance(1)))
+            .map(move |c| (c, cursor.advance(1)))
             .ok_or_else(|| XmlError::InvalidCharacterReference(code.to_string()))
     }
 }
@@ -437,7 +431,7 @@ impl<'a> Parser<'a> for CharRefToken {
 /// Entity Reference
 ///
 /// `EntityRef ::= '&' Name ';'`
-struct EntityRefToken;
+pub(crate) struct EntityRefToken;
 
 impl<'a> Parser<'a> for EntityRefToken {
     type Attribute = &'a str;
@@ -451,7 +445,7 @@ impl<'a> Parser<'a> for EntityRefToken {
 
 // 4.3.3 Character Encoding in Entities
 
-struct EncodingDeclToken;
+pub(crate) struct EncodingDeclToken;
 
 impl<'a> Parser<'a> for EncodingDeclToken {
     type Attribute = &'a str;
@@ -478,7 +472,7 @@ impl<'a> Parser<'a> for EncodingDeclToken {
     }
 }
 
-struct EncNameToken;
+pub(crate) struct EncNameToken;
 
 impl<'a> Parser<'a> for EncNameToken {
     type Attribute = &'a str;
@@ -683,13 +677,17 @@ trait InternalXmlParser<'a> {
     fn parse_doctypedecl(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let (decl, cursor) = DocTypeDeclToken.parse(self.cursor())?;
         self.set_cursor(cursor);
+        // TODO: add new entities
         Ok(Some(XmlEvent::Dtd(Box::new(decl))))
     }
 
     fn parse_pi(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
         let (pi, cursor) = PIToken.parse(self.cursor())?;
         self.set_cursor(cursor);
-        Ok(Some(XmlEvent::PI(pi)))
+        Ok(Some(XmlEvent::PI(PI {
+            target: Cow::Borrowed(pi.0),
+            data: pi.1.map(Cow::Borrowed),
+        })))
     }
 
     fn parse_comment(&mut self) -> Result<Option<XmlEvent<'a>>, XmlError> {
@@ -734,7 +732,7 @@ trait InternalXmlParser<'a> {
             if c == b'#' {
                 let (character, cursor) = CharRefToken.parse(cur)?;
                 self.set_cursor(cursor);
-                Ok(Some(XmlEvent::Characters(character.into())))
+                Ok(Some(XmlEvent::Characters(character.to_string().into())))
             } else {
                 let (entity_ref, cursor) = EntityRefToken.parse(cur)?;
                 if let Some(entity) = ctx.entities.get_rc(entity_ref) {
@@ -1529,7 +1527,7 @@ mod tests {
         fn fail_on_cdata_section_end() {
             let mut reader = Reader::new("<e>]]></e>");
             assert_evt!(Ok(Some(XmlEvent::stag("e", false))), reader);
-            assert_evt!(Err(XmlError::CDataEndInContent), reader);
+            assert_evt!(Err(XmlError::IllegalCDataSectionEnd), reader);
         }
 
         #[test]
@@ -1710,20 +1708,25 @@ mod tests {
     }
 
     mod pi {
+        use std::borrow::Cow;
+
         use crate::reader::Reader;
         use crate::{XmlDecl, XmlError, XmlEvent};
 
         #[test]
         fn parse_pi() {
             let mut reader = Reader::new("<?e?>");
-            assert_evt!(Ok(Some(XmlEvent::pi("e", ""))), reader);
+            assert_evt!(Ok(Some(XmlEvent::pi("e", None))), reader);
             assert_evt!(Ok(None), reader);
         }
 
         #[test]
         fn parse_pi_data() {
             let mut reader = Reader::new("<?e abc=gdsfh ?>");
-            assert_evt!(Ok(Some(XmlEvent::pi("e", "abc=gdsfh "))), reader);
+            assert_evt!(
+                Ok(Some(XmlEvent::pi("e", Some(Cow::Borrowed("abc=gdsfh "))))),
+                reader
+            );
             assert_evt!(Ok(None), reader);
         }
 
@@ -1731,7 +1734,7 @@ mod tests {
         #[ignore]
         fn parse_pi_starting_with_xml_1() {
             let mut reader = Reader::new("<?xml-abc?>");
-            assert_evt!(Ok(Some(XmlEvent::pi("xml-abc", ""))), reader);
+            assert_evt!(Ok(Some(XmlEvent::pi("xml-abc", None))), reader);
             assert_evt!(Ok(None), reader);
         }
 
@@ -1739,7 +1742,7 @@ mod tests {
         fn parse_pi_starting_with_xml_2() {
             let mut reader = Reader::new("<?xml version='1.0'?><?xml-abc?>");
             assert_evt_matches!(Ok(Some(XmlEvent::XmlDecl(_))), reader);
-            assert_evt!(Ok(Some(XmlEvent::pi("xml-abc", ""))), reader);
+            assert_evt!(Ok(Some(XmlEvent::pi("xml-abc", None))), reader);
             assert_evt!(Ok(None), reader);
         }
 

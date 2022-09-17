@@ -80,7 +80,11 @@ impl ReaderIT {
     }
 
     fn write_pi<'a>(&self, writer: &mut String, pi: PI<'a>) -> Result<(), XmlError> {
-        write!(writer, "<?{}{}?>", pi.target(), pi.data());
+        if let Some(data) = pi.data() {
+            write!(writer, "<?{}{}?>", pi.target(), data);
+        } else {
+            write!(writer, "<?{}?>", pi.target());
+        }
         Ok(())
     }
 }
