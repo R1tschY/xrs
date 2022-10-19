@@ -43,6 +43,34 @@ pub trait StrVisitor<'i>: Sized {
     fn visit_string(self, value: String) -> Result<Self::Value, XmlError>;
 }
 
+pub struct CowVisitor;
+
+impl<'i> StrVisitor<'i> for CowVisitor {
+    type Value = Cow<'i, str>;
+
+    fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
+        Ok(Cow::Borrowed(value))
+    }
+
+    fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
+        Ok(Cow::Owned(value))
+    }
+}
+
+pub struct StringVisitor;
+
+impl<'i> StrVisitor<'i> for StringVisitor {
+    type Value = String;
+
+    fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
+        Ok(value.to_string())
+    }
+
+    fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
+        Ok(value)
+    }
+}
+
 /// Simple XML parser
 ///
 /// Does not support DTDs and only UTF-8 strings.
@@ -596,20 +624,6 @@ mod tests {
 
         fn visit_comment(self, comment: &'i str) -> Result<Self::Value, XmlError> {
             Ok(Event::Comment(comment))
-        }
-    }
-
-    struct CowVisitor;
-
-    impl<'i> StrVisitor<'i> for CowVisitor {
-        type Value = Cow<'i, str>;
-
-        fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
-            Ok(Cow::Borrowed(value))
-        }
-
-        fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
-            Ok(Cow::Owned(value))
         }
     }
 
