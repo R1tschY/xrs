@@ -150,11 +150,11 @@ pub enum Recommendation {
     #[serde(rename = "XML1.0-errata2e")]
     Xml_1_0_errata2e,
     #[serde(rename = "XML1.0-errata3e")]
-    Xml_1_1_errata2e,
+    Xml_1_0_errata3e,
     #[serde(rename = "XML1.0-errata4e")]
-    Ns_1_0_errata2e,
+    Xml_1_0_errata4e,
     #[serde(rename = "NS1.0-errata1e")]
-    Ns_1_1_errata2e,
+    Ns_1_0_errata1e,
 }
 
 impl Default for Recommendation {
