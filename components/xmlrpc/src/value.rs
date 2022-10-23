@@ -1,9 +1,53 @@
 use std::borrow::Cow;
-use std::fmt::Formatter;
+use std::fmt::{Formatter, Write};
 
 use serde::de::{Error, MapAccess, SeqAccess, Unexpected, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+#[cfg(datetime)]
+use time::{format_description::well_known::Iso8601, OffsetDateTime};
+
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename = "dateTime.iso8601")]
+pub struct DateTimeRawIso8601<'a>(Cow<'a, str>);
+
+impl<'a> DateTimeRawIso8601<'a> {
+    pub fn new(date_time: impl Into<Cow<'a, str>>) -> Self {
+        Self(date_time.into())
+    }
+}
+
+#[cfg(datetime)]
+pub struct DateTimeIso8601(OffsetDateTime);
+
+#[cfg(datetime)]
+impl<'de> Deserialize<'de> for DateTimeIso8601 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Iso8601Visitor;
+
+        impl<'de> Visitor<'de> for Iso8601Visitor {
+            type Value = DateTimeIso8601;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("ISO 8601 date time string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                OffsetDateTime::parse(&v, &Iso8601::PARSING)
+                    .map(DateTimeIso8601)
+                    .map_err(|err| E::custom(err))
+            }
+        }
+
+        deserializer.deserialize_newtype_struct("dateTime.iso8601", Iso8601Visitor)
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Value<'a> {
@@ -11,7 +55,7 @@ pub enum Value<'a> {
     Boolean(bool),
     String(Cow<'a, str>),
     Double(f64),
-    DateTimeIso8601(Cow<'a, str>),
+    DateTimeIso8601(DateTimeRawIso8601<'a>),
     Base64(Vec<u8>),
     Struct(Vec<(Cow<'a, str>, Value<'a>)>),
     Array(Vec<Value<'a>>),

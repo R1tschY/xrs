@@ -2,11 +2,9 @@ use std::borrow::Cow;
 use std::io::BufRead;
 
 use serde::de::value::CowStrDeserializer;
-use serde::de::{DeserializeOwned, IntoDeserializer};
+use serde::de::{DeserializeOwned, DeserializeSeed, IntoDeserializer};
 use serde::{de, forward_to_deserialize_any};
 use serde::{serde_if_integer128, Deserialize};
-use time::format_description::well_known::Iso8601;
-use time::OffsetDateTime;
 
 pub use error::DeError;
 use xrs_parser::{Reader, STag, XmlEvent, XmlNsEvent};
@@ -224,7 +222,7 @@ impl<'a> Deserializer<'a> {
 
     /// Consumes Characters with terminating end tag
     fn next_scalar_str(&mut self) -> Result<Cow<'a, str>, Error> {
-        let mut result = Cow::from("");
+        let mut result = Cow::default();
         loop {
             match self.next()? {
                 XmlEvent::Characters(chars) => result.push_cow(chars),
@@ -271,13 +269,6 @@ impl<'a> Deserializer<'a> {
         self.peek = Some(evt);
     }
 
-    fn deserialize_date_time_iso8601<'de, V: de::Visitor<'de>>(
-        &mut self,
-        _visitor: V,
-    ) -> Result<V::Value, Error> {
-        unimplemented!()
-    }
-
     fn read_int<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let result = self.next_scalar_str()?.parse();
         visitor.visit_i32(self.fix_result(result)?)
@@ -308,9 +299,7 @@ impl<'a> Deserializer<'a> {
         visitor: V,
     ) -> Result<V::Value, Error> {
         let text = self.next_scalar_str()?;
-        let date_time = OffsetDateTime::parse(&text, &Iso8601::PARSING)
-            .map_err(|err| self.fix_position(err.into()))?;
-        visitor.visit_i64(date_time.unix_timestamp())
+        visitor.visit_newtype_struct(text.into_deserializer())
     }
 
     fn read_base64<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
@@ -495,10 +484,17 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_newtype_struct<V: de::Visitor<'de>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
-        visitor.visit_newtype_struct(self)
+        if name == "dateTime.iso8601" {
+            self.next_type("dateTime.iso8601")?;
+            let res = self.read_date_time_iso8601(visitor)?;
+            self.expect_end("value")?;
+            Ok(res)
+        } else {
+            visitor.visit_newtype_struct(self)
+        }
     }
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -1273,13 +1269,37 @@ mod tests {
         }
     }
 
+    mod date_time_value {
+        use crate::value::DateTimeRawIso8601;
+
+        use super::*;
+
+        #[test]
+        fn valid() {
+            let input = r#"<value><dateTime.iso8601>DATETIME</dateTime.iso8601></value>"#;
+
+            let actual: DateTimeRawIso8601 = value_from_str(input).unwrap();
+
+            assert_eq!(actual, DateTimeRawIso8601::new("DATETIME"))
+        }
+
+        #[test]
+        fn wrong_type() {
+            let input = r#"<value><int>1</int></value>"#;
+
+            let actual: Result<DateTimeRawIso8601, Error> = value_from_str(input);
+
+            assert!(matches!(actual, Err(_)));
+        }
+    }
+
     mod struct_value {
         use super::*;
 
         #[test]
         fn empty() {
             #[derive(Deserialize, PartialEq, Debug)]
-            struct Struct {};
+            struct Struct {}
 
             let input = r#"<value><struct></struct></value>"#;
 
