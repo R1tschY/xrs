@@ -8,8 +8,8 @@ use crate::parser::core::optional;
 use crate::parser::Parser;
 use crate::reader::chars::is_ascii_content_char;
 use crate::reader::{
-    AttValueToken, CDataToken, CharRefToken, CommentToken, EntityRefToken, EqToken, NameToken,
-    PIToken, SToken, XmlDeclToken,
+    AttValueToken, CDataToken, CharRefToken, CommentToken, EntityRefToken, EntityStrValueResolver,
+    EqToken, NameToken, PIToken, SToken, XmlDeclToken,
 };
 use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::{Cursor, XmlDecl, XmlDtdError, XmlError, XmlErrorAtom};
@@ -41,8 +41,22 @@ pub trait AttributeAccess<'i>: Sized {
 pub trait StrVisitor<'i>: Sized {
     type Value;
 
-    fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError>;
-    fn visit_string(self, value: String) -> Result<Self::Value, XmlError>;
+    fn visit_str(self, value: &str) -> Result<Self::Value, XmlError>;
+
+    fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
+        self.visit_str(value)
+    }
+
+    fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
+        self.visit_str(&value)
+    }
+
+    fn visit_cow(self, value: Cow<'i, str>) -> Result<Self::Value, XmlError> {
+        match value {
+            Cow::Borrowed(borrowed) => self.visit_borrowed(borrowed),
+            Cow::Owned(owned) => self.visit_string(owned),
+        }
+    }
 }
 
 pub struct CowVisitor;
@@ -470,6 +484,10 @@ impl<'i> SimpleXmlParser<'i> {
     }
 }
 
+struct SimpleEntityStrValueResolver;
+
+impl<'i> EntityStrValueResolver<'i> for SimpleEntityStrValueResolver {}
+
 struct SimpleAttributeAccess<'a, 'i> {
     parser: &'a mut SimpleXmlParser<'i>,
     got_whitespace: bool,
@@ -506,7 +524,7 @@ impl<'a, 'i> AttributeAccess<'i> for SimpleAttributeAccess<'a, 'i> {
 
             let (attr_name, cur) = NameToken.parse(self.parser.cursor)?;
             let (_, cur) = EqToken.parse(cur)?;
-            let (value, cur) = AttValueToken.parse(cur)?;
+            let (value, cur) = AttValueToken::new(SimpleEntityStrValueResolver).parse(cur)?;
             if let Ok((_, cur)) = SToken.parse(cur) {
                 self.parser.commit(cur);
                 self.got_whitespace = true;
@@ -523,11 +541,7 @@ impl<'a, 'i> AttributeAccess<'i> for SimpleAttributeAccess<'a, 'i> {
             self.parser.attribute_names.push(attr_name);
 
             let key = key_visitor.visit_borrowed(attr_name)?;
-            // TODO: resolve entities in attr value
-            let value = match value {
-                Cow::Borrowed(borrowed) => value_visitor.visit_borrowed(borrowed),
-                Cow::Owned(owned) => value_visitor.visit_string(owned),
-            }?;
+            let value = value_visitor.visit_cow(value)?;
             Ok(Some((key, value)))
         } else {
             Err(XmlError::UnexpectedEof)
@@ -629,6 +643,28 @@ mod tests {
 
         fn visit_comment(self, comment: &'i str) -> Result<Self::Value, XmlError> {
             Ok(Event::Comment(comment))
+        }
+    }
+
+    struct CowVisitor;
+
+    impl<'i> StrVisitor<'i> for CowVisitor {
+        type Value = Cow<'i, str>;
+
+        fn visit_str(self, value: &str) -> Result<Self::Value, XmlError> {
+            Ok(Cow::Owned(value.to_string()))
+        }
+
+        fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
+            Ok(Cow::Borrowed(value))
+        }
+
+        fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
+            Ok(Cow::Owned(value))
+        }
+
+        fn visit_cow(self, value: Cow<'i, str>) -> Result<Self::Value, XmlError> {
+            Ok(value)
         }
     }
 

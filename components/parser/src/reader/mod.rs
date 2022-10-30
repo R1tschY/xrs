@@ -10,12 +10,14 @@ use std::str::FromStr;
 
 use xrs_chars::{XmlAsciiChar, XmlChar};
 
+use crate::cow::CowStrBuilder;
 use crate::parser::core::{kleene, optional, plus, raw, Plus};
 use crate::parser::helper::map_error;
 use crate::parser::string::{bytes, chars, lit};
 use crate::parser::Parser;
 use crate::reader::chars::is_ascii_content_char;
 use crate::reader::dtd::DocTypeDeclToken;
+use crate::simple::StrVisitor;
 use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::XmlEvent::Characters;
 use crate::{Attribute, Cursor, ETag, XmlDecl, XmlError, XmlEvent, PI};
@@ -134,47 +136,99 @@ impl<'a> Parser<'a> for NameToken {
     }
 }
 
-pub(crate) struct AttValueToken;
+/// Entity resolver for entity references within attribute values
+pub(crate) trait EntityStrValueResolver<'i> {
+    fn resolve_entity(
+        &self,
+        entity_ref: &str,
+        str_builder: &mut CowStrBuilder<'i>,
+    ) -> Result<(), XmlError> {
+        match entity_ref {
+            "apos" => Ok(str_builder.push_borrow_str("\'")),
+            "quot" => Ok(str_builder.push_borrow_str("\"")),
+            "lt" => Ok(str_builder.push_borrow_str("<")),
+            "gt" => Ok(str_builder.push_borrow_str(">")),
+            "amp" => Ok(str_builder.push_borrow_str("&")),
+            _ => self.resolve_unknown_entity(entity_ref, str_builder),
+        }
+    }
 
-impl<'a> Parser<'a> for AttValueToken {
+    fn resolve_unknown_entity(
+        &self,
+        entity_ref: &str,
+        str_builder: &mut CowStrBuilder<'i>,
+    ) -> Result<(), XmlError> {
+        Err(XmlError::UnknownEntity(entity_ref.to_string()))
+    }
+}
+
+pub(crate) struct AttValueToken<R>(R);
+
+impl<'a, R: EntityStrValueResolver<'a>> Parser<'a> for AttValueToken<R> {
     type Attribute = Cow<'a, str>;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
         if let Some(c) = cursor.next_byte(0) {
             if c == b'"' {
-                let start = cursor.advance(1);
-                if let Some((i, c)) = start
-                    .rest_bytes()
-                    .iter()
-                    .enumerate()
-                    .find(|(_, &c)| c == b'"')
-                {
-                    return Ok((
-                        Cow::Borrowed(start.rest().split_at(i).0),
-                        start.advance(i + 1),
-                    ));
-                }
-                return Err(XmlError::ExpectToken("\""));
-            }
-            if c == b'\'' {
-                let start = cursor.advance(1);
-                if let Some((i, c)) = start
-                    .rest_bytes()
-                    .iter()
-                    .enumerate()
-                    .find(|(_, &c)| c == b'\'')
-                {
-                    return Ok((
-                        Cow::Borrowed(start.rest().split_at(i).0),
-                        start.advance(i + 1),
-                    ));
-                }
-                return Err(XmlError::ExpectToken("'"));
+                return self.parse_value(cursor, b'"');
+            } else if c == b'\'' {
+                return self.parse_value(cursor, b'\'');
             }
         }
 
         Err(XmlError::ExpectedAttrValue)
+    }
+}
+
+impl<'a, R: EntityStrValueResolver<'a>> AttValueToken<R> {
+    pub fn new(resolver: R) -> Self {
+        Self(resolver)
+    }
+
+    fn parse_value(
+        &self,
+        mut rest: Cursor<'a>,
+        quote: u8,
+    ) -> Result<(Cow<'a, str>, Cursor<'a>), XmlError> {
+        let mut attr = CowStrBuilder::default();
+
+        let mut i = 0;
+        let mut rest = rest.advance(1);
+        while i < rest.rest_bytes().len() {
+            let c = rest.rest_bytes()[i];
+            if c == quote {
+                attr.push_borrow_str(rest.rest().split_at(i).0);
+                return Ok((attr.build(), rest.advance(i + 1)));
+            } else if c == b'&' {
+                attr.push_borrow_str(rest.rest().split_at(i).0);
+                let cursor = rest.advance(i);
+                if let Some(c) = cursor.next_byte(1) {
+                    if c == b'#' {
+                        let (character, cursor) = CharRefToken.parse(cursor)?;
+                        let mut buf = [0; 4];
+                        attr.push_str(character.encode_utf8(&mut buf));
+                        i = 0;
+                        rest = cursor;
+                    } else {
+                        let (entity_ref, cursor) = EntityRefToken.parse(cursor)?;
+                        self.0.resolve_entity(entity_ref, &mut attr)?;
+                        i = 0;
+                        rest = cursor;
+                    }
+                } else {
+                    return Err(XmlError::IllegalReference);
+                }
+            } else if c == b'<' {
+                return Err(XmlError::IllegalAttributeValue(
+                    "< not allowed in attribute value",
+                ));
+            } else {
+                i += 1;
+            }
+        }
+
+        return Err(XmlError::ExpectedAttrValue);
     }
 }
 
@@ -563,6 +617,10 @@ impl Entities {
     }
 }
 
+struct SimpleEntityStrValueResolver;
+
+impl<'i> EntityStrValueResolver<'i> for SimpleEntityStrValueResolver {}
+
 trait InternalXmlParser<'a> {
     fn stack_push(&mut self, tag: &'a str);
     fn attributes_push(&mut self, name: &'a str, value: Cow<'a, str>);
@@ -623,7 +681,7 @@ trait InternalXmlParser<'a> {
 
             let (attr_name, cur) = NameToken.parse(cursor)?;
             let (_, cur) = EqToken.parse(cur)?;
-            let (value, cur) = AttValueToken.parse(cur)?;
+            let (value, cur) = AttValueToken(SimpleEntityStrValueResolver).parse(cur)?;
             if let Ok((_, cur)) = SToken.parse(cur) {
                 cursor = cur;
                 got_whitespace = true;
@@ -1260,13 +1318,16 @@ mod tests {
     }
 
     macro_rules! assert_evt_matches {
-        ($exp:pat, $reader:expr) => {
+        ($exp:pat, $reader:expr) => {{
+            let _evt_ = $reader.next();
             assert!(
-                matches!($reader.next(), $exp),
-                "error at {}",
-                $reader.cursor_offset()
+                matches!(_evt_, $exp),
+                "error at {}: {:?} does not match {}",
+                $reader.cursor_offset(),
+                _evt_,
+                stringify!($exp)
             )
-        };
+        }};
     }
 
     fn empty_array<T>() -> &'static [T] {
@@ -1366,6 +1427,74 @@ mod tests {
                 }),
                 reader
             );
+        }
+
+        #[test]
+        fn attribute_resolve_quot() {
+            let mut reader = Reader::new("<e a='&quot;' />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", "\"")], reader.attributes());
+        }
+
+        #[test]
+        fn attribute_resolve_apos() {
+            let mut reader = Reader::new("<e a='&apos;' />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", "\'")], reader.attributes());
+        }
+
+        #[test]
+        fn attribute_resolve_lt() {
+            let mut reader = Reader::new("<e a='&lt;' />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", "<")], reader.attributes());
+        }
+
+        #[test]
+        fn attribute_resolve_gt() {
+            let mut reader = Reader::new("<e a='&gt;' />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", ">")], reader.attributes());
+        }
+
+        #[test]
+        fn attribute_resolve_amp() {
+            let mut reader = Reader::new("<e a='&amp;' />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", "&")], reader.attributes());
+        }
+
+        #[test]
+        fn attribute_resolve_quot_in_quotes() {
+            let mut reader = Reader::new("<e a=\"&quot;\" />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", "\"")], reader.attributes());
+        }
+
+        #[test]
+        fn embedded_entity() {
+            let mut reader = Reader::new("<e a=\"a&quot;b\" />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", "a\"b")], reader.attributes());
+        }
+
+        #[test]
+        fn lt_in_attribute_value() {
+            let mut reader = Reader::new("<e a='<' />");
+            assert_evt_matches!(Err(XmlError::IllegalAttributeValue { .. }), reader);
+        }
+
+        #[test]
+        fn attribute_resolve_char_code() {
+            let mut reader = Reader::new("<e a=\"&#x20;\" />");
+            assert_evt!(Ok(Some(XmlEvent::stag("e", true))), reader);
+            assert_eq!(&[Attribute::new("a", " ")], reader.attributes());
+        }
+
+        #[test]
+        fn attribute_error_entity() {
+            let mut reader = Reader::new("<e a='&' />");
+            assert_evt_matches!(Err(XmlError::IllegalNameStartChar('\'')), reader);
         }
     }
 

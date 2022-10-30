@@ -17,6 +17,7 @@ use xrs_chars::XmlChar;
 use crate::dtd::DocTypeDecl;
 use crate::XmlError::{ExpectedElementEnd, IllegalNameStartChar};
 
+pub(crate) mod cow;
 mod dtd;
 mod namespace;
 pub mod parser;
