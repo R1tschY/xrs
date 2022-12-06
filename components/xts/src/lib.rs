@@ -295,32 +295,34 @@ impl XmlTester {
     pub fn execute_test(parser: &dyn TestableParser, test: &Test, base: &Path) {
         let path = base.join(&test.uri);
         let content = fs::read(&path).unwrap();
-        match test.ty {
-            Type::Valid | Type::Invalid => {
-                let result = parser.check_well_formed(&content, test.namespace.into());
 
-                match result {
-                    Ok(()) => (),
-                    Err((message, offset)) => {
-                        let (line, column) = offset_to_line_and_column(&content, offset).unwrap();
-                        assert!(
-                            false,
-                            "{}:{}:{}: should be well-formed ({}) [{}]: {}",
-                            path.display(),
-                            line,
-                            column,
-                            &test.description[0],
-                            &test.sections,
-                            message
-                        )
-                    }
+        let well_formed = parser.check_well_formed(&content, test.namespace.into());
+
+        match well_formed.clone() {
+            Err((message, _)) if message == "<IGNORE>" => return,
+            _ => (),
+        }
+
+        match test.ty {
+            Type::Valid | Type::Invalid => match well_formed {
+                Ok(()) => (),
+                Err((message, offset)) => {
+                    let (line, column) = offset_to_line_and_column(&content, offset).unwrap();
+                    assert!(
+                        false,
+                        "{}:{}:{}: should be well-formed ({}) [{}]: {}",
+                        path.display(),
+                        line,
+                        column,
+                        &test.description[0],
+                        &test.sections,
+                        message
+                    );
                 }
-            }
+            },
             Type::Error => return,
             Type::NotWf => assert!(
-                parser
-                    .check_well_formed(&content, test.namespace.into())
-                    .is_err(),
+                well_formed.is_err(),
                 "{}:0:0: should not be well-formed ({}) [{}]",
                 path.display(),
                 &test.description[0],

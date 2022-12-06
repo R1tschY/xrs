@@ -22,7 +22,7 @@ mod namespace;
 pub mod parser;
 mod reader;
 mod shufti;
-mod simple;
+pub mod simple;
 
 /// XML Declaration
 #[derive(Clone, Debug, PartialEq)]

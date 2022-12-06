@@ -441,14 +441,14 @@ impl<'i> SimpleXmlParser<'i> {
             } else {
                 let (entity_ref, cursor) = EntityRefToken.parse(cur)?;
                 self.commit(cursor);
-                match entity_ref {
-                    "apos" => visitor.visit_characters("\'"),
-                    "quot" => visitor.visit_characters("\""),
-                    "lt" => visitor.visit_characters("<"),
-                    "gt" => visitor.visit_characters(">"),
-                    "amp" => visitor.visit_characters("&"),
-                    _ => Err(XmlError::UnknownEntity(entity_ref.to_string())),
-                }
+                visitor.visit_characters(match entity_ref {
+                    "apos" => "\'",
+                    "quot" => "\"",
+                    "lt" => "<",
+                    "gt" => ">",
+                    "amp" => "&",
+                    _ => return Err(XmlError::UnknownEntity(entity_ref.to_string())),
+                })
             }
         } else {
             Err(XmlError::IllegalReference)
