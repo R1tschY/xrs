@@ -137,7 +137,7 @@ impl<'a> Parser<'a> for NameToken {
 pub(crate) struct AttValueToken;
 
 impl<'a> Parser<'a> for AttValueToken {
-    type Attribute = &'a str;
+    type Attribute = Cow<'a, str>;
     type Error = XmlError;
 
     fn parse(&self, cursor: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
@@ -150,9 +150,12 @@ impl<'a> Parser<'a> for AttValueToken {
                     .enumerate()
                     .find(|(_, &c)| c == b'"')
                 {
-                    return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
+                    return Ok((
+                        Cow::Borrowed(start.rest().split_at(i).0),
+                        start.advance(i + 1),
+                    ));
                 }
-                return Err(XmlError::ExpectedAttrValue);
+                return Err(XmlError::ExpectToken("\""));
             }
             if c == b'\'' {
                 let start = cursor.advance(1);
@@ -162,9 +165,12 @@ impl<'a> Parser<'a> for AttValueToken {
                     .enumerate()
                     .find(|(_, &c)| c == b'\'')
                 {
-                    return Ok((start.rest().split_at(i).0, start.advance(i + 1)));
+                    return Ok((
+                        Cow::Borrowed(start.rest().split_at(i).0),
+                        start.advance(i + 1),
+                    ));
                 }
-                return Err(XmlError::ExpectedAttrValue);
+                return Err(XmlError::ExpectToken("'"));
             }
         }
 
@@ -559,7 +565,7 @@ impl Entities {
 
 trait InternalXmlParser<'a> {
     fn stack_push(&mut self, tag: &'a str);
-    fn attributes_push(&mut self, name: &'a str, value: &'a str);
+    fn attributes_push(&mut self, name: &'a str, value: Cow<'a, str>);
     fn stack_pop(&mut self) -> Option<Cow<'a, str>>;
     fn set_version(&mut self, version: String);
     fn set_empty(&mut self, v: bool);
@@ -774,7 +780,7 @@ impl<'a> InternalXmlParser<'a> for DocumentParser<'a> {
         self.stack.push(tag);
     }
 
-    fn attributes_push(&mut self, name: &'a str, value: &'a str) {
+    fn attributes_push(&mut self, name: &'a str, value: Cow<'a, str>) {
         self.attributes.push(Attribute::new(name, value));
     }
 
@@ -986,10 +992,10 @@ impl<'a> InternalXmlParser<'a> for EntityParser<'a> {
         self.state.stack.push(tag.to_string())
     }
 
-    fn attributes_push(&mut self, name: &'a str, value: &'a str) {
+    fn attributes_push(&mut self, name: &'a str, value: Cow<'a, str>) {
         self.state
             .attributes
-            .push(Attribute::new(name.to_string(), value.to_string()))
+            .push(Attribute::new(name.to_string(), value.into_owned()))
     }
 
     fn stack_pop(&mut self) -> Option<Cow<'a, str>> {

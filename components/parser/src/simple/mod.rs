@@ -522,7 +522,10 @@ impl<'a, 'i> AttributeAccess<'i> for SimpleAttributeAccess<'a, 'i> {
 
             let key = key_visitor.visit_borrowed(attr_name)?;
             // TODO: resolve entities in attr value
-            let value = value_visitor.visit_borrowed(value)?;
+            let value = match value {
+                Cow::Borrowed(borrowed) => value_visitor.visit_borrowed(borrowed),
+                Cow::Owned(owned) => value_visitor.visit_string(owned),
+            }?;
             Ok(Some((key, value)))
         } else {
             Err(XmlError::UnexpectedEof)
@@ -739,6 +742,24 @@ mod tests {
                 }),
                 parser
             );
+        }
+
+        #[test]
+        fn attribute_missing_value() {
+            let mut parser = SimpleXmlParser::from_str("<e a></e>");
+            assert_evt!(Err(XmlError::ExpectedAttrValue), parser);
+        }
+
+        #[test]
+        fn attribute_wrong_quote() {
+            let mut parser = SimpleXmlParser::from_str("<e a='v\"></e>");
+            assert_evt!(Err(XmlError::ExpectToken("single quote")), parser);
+        }
+
+        #[test]
+        fn attribute_missing_quote() {
+            let mut parser = SimpleXmlParser::from_str("<e a=v></e>");
+            assert_evt!(Err(XmlError::ExpectToken("quote")), parser);
         }
     }
 

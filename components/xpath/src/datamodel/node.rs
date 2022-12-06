@@ -53,7 +53,7 @@ pub struct NamespaceNode<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct PINode<'a> {
     pub target: Cow<'a, str>,
-    pub data: Cow<'a, str>,
+    pub data: Option<Cow<'a, str>>,
 }
 
 /// Element Child
@@ -117,7 +117,7 @@ impl<'a> Node<'a> {
             Node::Element(elem) => Self::text_value(&elem.children),
             Node::Attribute(attr) => attr.value.clone(), // TODO: normalize
             Node::Namespace(ns) => ns.uri.clone(),
-            Node::ProcessingInstruction(pi) => pi.data.clone(),
+            Node::ProcessingInstruction(pi) => pi.data.clone().unwrap_or_default(),
             Node::Comment(comment) => comment.clone(),
             Node::Text(text) => text.clone(),
         }
@@ -136,7 +136,7 @@ impl<'a> Node<'a> {
             }),
             Node::Namespace(ns) => Some(ExpandedName {
                 namespace: None,
-                local: ns.prefix.clone().unwrap_or_else(|| "".into()),
+                local: ns.prefix.clone().unwrap_or_else(|| Cow::Borrowed("")),
             }),
             Node::ProcessingInstruction(pi) => Some(ExpandedName {
                 namespace: None,
