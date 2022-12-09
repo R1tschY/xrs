@@ -1,3 +1,5 @@
+extern crate core;
+
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Formatter;
@@ -5,8 +7,11 @@ use std::fmt::Formatter;
 use serde::{Deserialize, Serialize};
 
 pub mod de;
+mod error;
 pub mod ser;
 pub mod value;
+
+pub use crate::error::XmlRpcError;
 
 pub struct MethodCall<'a, T> {
     method_name: Cow<'a, str>,

@@ -1,5 +1,5 @@
 [package]
-name = "writer"
+name = "xrs-writer"
 version = "0.1.0"
 edition = "2021"
 
