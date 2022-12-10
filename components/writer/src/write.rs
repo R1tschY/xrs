@@ -68,9 +68,15 @@ impl<'a, T: ?Sized + UnicodeWrite> UnicodeWrite for &mut T {
     }
 }
 
-pub struct Uft8Writer<T: io::Write>(T);
+pub struct Utf8Writer<T: io::Write>(T);
 
-impl<T: io::Write> UnicodeWrite for Uft8Writer<T> {
+impl<T: io::Write> Utf8Writer<T> {
+    pub fn new(write: T) -> Self {
+        Self(write)
+    }
+}
+
+impl<T: io::Write> UnicodeWrite for Utf8Writer<T> {
     fn write_all(&mut self, s: &str) -> io::Result<()> {
         self.0.write_all(s.as_bytes())
     }
