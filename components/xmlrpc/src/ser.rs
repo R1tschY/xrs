@@ -712,7 +712,9 @@ impl<W: XmlWrite<Error = std::io::Error>> ParamsSerializer<W> {
     fn serialize_single_arg<T: Serialize>(&mut self, value: T) -> Result<(), XmlRpcError> {
         self.0.writer.element("params")?.finish()?;
         self.0.writer.element("param")?.finish()?;
+        self.0.writer.element("value")?.finish()?;
         value.serialize(&mut self.0)?;
+        self.0.writer.end_element()?;
         self.0.writer.end_element()?;
         self.0.writer.end_element()?;
         Ok(())
@@ -904,7 +906,9 @@ impl<'s, W: XmlWrite<Error = std::io::Error>> ParamsArraySerializer<'s, W> {
         T: Serialize,
     {
         self.ser.writer.element("param")?.finish()?;
+        self.ser.writer.element("value")?.finish()?;
         value.serialize(&mut *self.ser)?;
+        self.ser.writer.end_element()?;
         self.ser.writer.end_element()?;
         Ok(())
     }
