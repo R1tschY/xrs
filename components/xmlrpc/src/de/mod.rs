@@ -731,7 +731,7 @@ impl<'de, 'a> de::SeqAccess<'de> for ArrayDeserializer<'a, 'de> {
                 seed.deserialize(&mut *self.de).map(Some)
             }
             Ok(None) => {
-                self.de.expect_end("value")?;
+                self.de.expect_end("array")?;
                 Ok(None)
             }
             _ => return Err(self.de.error(Reason::ExpectedElement("value"))),
