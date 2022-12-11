@@ -1,3 +1,4 @@
+use crate::de::DeError;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::ops::Deref;
 
@@ -5,8 +6,10 @@ use std::ops::Deref;
 enum Repr {
     Io(std::io::Error),
     Ser(String),
-    De(String),
+    De(DeError),
     Fault { code: i32, string: String },
+    StatusCode { code: u16, string: String },
+    ContentType { string: String },
     WrongType { param: u16, expected: String },
 }
 
@@ -29,6 +32,13 @@ impl Display for XmlRpcError {
                 "Wrong type of parameter {}: {}",
                 param, expected
             )),
+            Repr::StatusCode { code, string } => f.write_fmt(format_args!(
+                "Unexpected HTTP status code {}: {}",
+                code, string
+            )),
+            Repr::ContentType { string } => {
+                f.write_fmt(format_args!("Unexpected HTTP content type: {}", string))
+            }
         }
     }
 }
@@ -42,13 +52,22 @@ impl XmlRpcError {
         Self(Box::new(Repr::Ser(message.into())))
     }
 
-    pub fn new_de(message: impl Into<String>) -> Self {
-        Self(Box::new(Repr::De(message.into())))
-    }
-
     pub fn new_fault(code: i32, string: impl Into<String>) -> Self {
         Self(Box::new(Repr::Fault {
             code,
+            string: string.into(),
+        }))
+    }
+
+    pub fn new_status_code(code: u16, string: impl Into<String>) -> Self {
+        Self(Box::new(Repr::StatusCode {
+            code,
+            string: string.into(),
+        }))
+    }
+
+    pub fn new_content_type(string: impl Into<String>) -> Self {
+        Self(Box::new(Repr::ContentType {
             string: string.into(),
         }))
     }
@@ -57,5 +76,11 @@ impl XmlRpcError {
 impl From<std::io::Error> for XmlRpcError {
     fn from(value: std::io::Error) -> Self {
         Self(Box::new(Repr::Io(value)))
+    }
+}
+
+impl From<DeError> for XmlRpcError {
+    fn from(err: DeError) -> Self {
+        Self(Box::new(Repr::De(err)))
     }
 }

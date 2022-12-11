@@ -3,6 +3,7 @@ use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
 use std::result::Result as StdResult;
 
+use crate::XmlRpcError;
 use xrs_parser::XmlError;
 
 /// Alias for a `Result` with the error type `serde_explicit_xml::Error`.

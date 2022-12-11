@@ -6,6 +6,7 @@ use std::fmt::Formatter;
 
 use serde::{Deserialize, Serialize};
 
+pub mod client;
 pub mod de;
 mod error;
 pub mod ser;
