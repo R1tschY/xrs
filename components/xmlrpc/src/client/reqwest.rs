@@ -1,6 +1,45 @@
 use crate::{MethodResponse, XmlRpcError};
 use mime::Mime;
+use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+static DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+
+pub struct XmlRpcClientBuilder {
+    http: reqwest::ClientBuilder,
+}
+
+impl XmlRpcClientBuilder {
+    pub fn new() -> Self {
+        Self {
+            http: reqwest::ClientBuilder::default().user_agent(DEFAULT_USER_AGENT),
+        }
+    }
+
+    #[cfg(base64)]
+    pub fn basic_auth<U, P>(mut self, username: U, password: Option<P>) -> Self
+    where
+        U: fmt::Display,
+        P: fmt::Display,
+    {
+        let mut auth = b"Basic ".to_vec();
+        {
+            let mut encoder = base64::Base64Encoder::new(&mut auth, base64::STANDARD);
+            write!(encoder, "{}:", username).unwrap();
+            if let Some(password) = password {
+                write!(encoder, "{}", password).unwrap();
+            }
+        }
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        let mut auth_value: HeaderValue = auth.try_into()?;
+        auth_value.set_sensitive(true);
+        headers.insert(reqwest::header::AUTHORIZATION, auth_value);
+        *self.http = self.http.default_headers(headers);
+        self
+    }
+}
 
 pub struct XmlRpcClient {
     http: reqwest::Client,
@@ -13,6 +52,27 @@ impl XmlRpcClient {
             http: reqwest::Client::new(),
             url: url.to_string(),
         }
+    }
+
+    pub async fn list_methods(&self, buf: &mut String) -> Result<Vec<String>, XmlRpcError> {
+        self.call("system.listMethods", &(), buf).await
+    }
+
+    pub async fn method_help(
+        &self,
+        method_name: &str,
+        buf: &mut String,
+    ) -> Result<String, XmlRpcError> {
+        self.call("system.methodHelp", &(method_name,), buf).await
+    }
+
+    pub async fn method_signature(
+        &self,
+        method_name: &str,
+        buf: &mut String,
+    ) -> Result<String, XmlRpcError> {
+        self.call("system.methodSignature", &(method_name,), buf)
+            .await
     }
 
     pub async fn call<'a, T: ?Sized + Serialize, U: Deserialize<'a>>(
