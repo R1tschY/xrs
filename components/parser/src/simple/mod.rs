@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use xrs_chars::{XmlAsciiChar, XmlChar};
 
+mod namespace;
+
 use crate::parser::core::optional;
 use crate::parser::Parser;
 use crate::reader::chars::is_ascii_content_char;

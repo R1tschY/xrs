@@ -294,6 +294,7 @@ pub enum XmlError {
     UnexpectedCharacter(char),
     CommentColonColon,
     UnknownNamespacePrefix(String),
+    IllegalNamespaceUri(String),
     Io(String),
     Decoding(String),
 }
