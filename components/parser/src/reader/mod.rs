@@ -1134,7 +1134,7 @@ struct DocumentContext {
     next_entity: Option<Rc<Entity>>,
 }
 
-/// XMl Pull Parser
+/// XML Pull Parser
 pub struct Reader<'a> {
     root_parser: DocumentParser<'a>,
     sub_parsers: Vec<EntityParserState>,

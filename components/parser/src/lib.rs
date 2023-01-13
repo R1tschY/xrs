@@ -21,7 +21,7 @@ mod dtd;
 mod namespace;
 pub mod parser;
 mod reader;
-mod shufti;
+pub mod shufti;
 pub mod simple;
 
 /// XML Declaration

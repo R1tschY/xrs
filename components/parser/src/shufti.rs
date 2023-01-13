@@ -34,9 +34,15 @@ pub trait SimdAlgo {
     }
 }
 
-struct ShuftiSEE3 {
+pub struct ShuftiSEE3 {
     low_tbl: __m128i,
     high_tbl: __m128i,
+}
+
+impl ShuftiSEE3 {
+    pub fn new(low_tbl: __m128i, high_tbl: __m128i) -> Self {
+        Self { low_tbl, high_tbl }
+    }
 }
 
 impl SimdAlgo for ShuftiSEE3 {
@@ -57,7 +63,7 @@ impl SimdAlgo for ShuftiSEE3 {
         // _mm_cmpeq_epi8_mask can make sense but requires AVX512BW + AVX512VL
         let tmp_ws_v0: __m128i = _mm_cmpeq_epi8(v_v0, zero);
         let mask = _mm_movemask_epi8(tmp_ws_v0) as u16;
-        if mask == 0xFFFF {
+        if mask == 0 {
             -1
         } else {
             mask.trailing_zeros() as i32
@@ -87,14 +93,23 @@ impl SimdAlgo for ShuftiSEE3 {
 }
 
 pub trait SimdExecutor {
-    fn skip(&self, data: &[u8]) -> usize;
+    unsafe fn ssse3_skip(&self, data: &[u8]) -> usize;
+
+    fn skip(&self, data: &[u8]) -> usize {
+        if is_x86_feature_detected!("ssse3") {
+            unsafe { self.ssse3_skip(data) }
+        } else {
+            panic!("SSSE3 cpu feature is required")
+        }
+    }
 }
 
 /// Unaligned-Aligned-Unaligned
-pub struct UauExecutor<T: SimdAlgo>(T);
+pub struct UauExecutor<T: SimdAlgo>(pub T);
 
 impl<T: SimdAlgo> SimdExecutor for UauExecutor<T> {
-    fn skip(&self, ptr: &[u8]) -> usize {
+    #[target_feature(enable = "ssse3")]
+    unsafe fn ssse3_skip(&self, ptr: &[u8]) -> usize {
         let mut skipped = 0usize;
 
         if ptr.len() < T::BLOCK_SIZE {
@@ -123,7 +138,6 @@ impl<T: SimdAlgo> SimdExecutor for UauExecutor<T> {
         }
 
         // iter suffix
-        assert!(ptr.len() - T::BLOCK_SIZE <= skipped as usize);
         let suffix_len = unsafe {
             self.0.block(T::load_unaligned(
                 ptr.as_ptr().add(ptr.len() - T::BLOCK_SIZE),
@@ -137,13 +151,37 @@ impl<T: SimdAlgo> SimdExecutor for UauExecutor<T> {
     }
 }
 
+/// Unaligned-Miniblock
+pub struct UmExecutor<T: SimdAlgo>(pub T);
+
+impl<T: SimdAlgo> SimdExecutor for UmExecutor<T> {
+    #[target_feature(enable = "ssse3")]
+    unsafe fn ssse3_skip(&self, ptr: &[u8]) -> usize {
+        for i in (0..ptr.len()).step_by(T::BLOCK_SIZE) {
+            let len = unsafe { self.0.block(T::load_unaligned(ptr.as_ptr().add(i))) };
+            if len >= 0 {
+                return i + len as usize;
+            }
+        }
+
+        let skipped = ptr.len() - (ptr.len() % T::BLOCK_SIZE);
+        let len = self.0.mini_block(ptr.get_unchecked(skipped..));
+        if len >= 0 {
+            skipped + len as usize
+        } else {
+            ptr.len()
+        }
+    }
+}
+
 /// Unaligned-Fallback
-pub struct UfExecutor<T: SimdAlgo>(T);
+pub struct UfExecutor<T: SimdAlgo>(pub T);
 
 impl<T: SimdAlgo> SimdExecutor for UfExecutor<T> {
-    fn skip(&self, ptr: &[u8]) -> usize {
+    #[target_feature(enable = "ssse3")]
+    unsafe fn ssse3_skip(&self, ptr: &[u8]) -> usize {
         let mut skipped = 0usize;
-        while ptr.len() < skipped + T::BLOCK_SIZE {
+        while ptr.len() >= skipped + T::BLOCK_SIZE {
             let len = unsafe { self.0.block(T::load_unaligned(ptr.as_ptr().add(skipped))) };
             if len >= 0 {
                 return skipped + len as usize;
@@ -164,17 +202,18 @@ impl<T: SimdAlgo> SimdExecutor for UfExecutor<T> {
 }
 
 /// Unaligned
-pub struct UExecutor<T: SimdAlgo>(T);
+pub struct UExecutor<T: SimdAlgo>(pub T);
 
 impl<T: SimdAlgo> SimdExecutor for UExecutor<T> {
-    fn skip(&self, ptr: &[u8]) -> usize {
+    #[target_feature(enable = "ssse3")]
+    unsafe fn ssse3_skip(&self, ptr: &[u8]) -> usize {
         if ptr.len() < T::BLOCK_SIZE {
             let len = self.0.mini_block(ptr);
             return if len >= 0 { len as usize } else { ptr.len() };
         }
 
         let mut skipped = 0usize;
-        while ptr.len() < skipped + T::BLOCK_SIZE {
+        while ptr.len() - T::BLOCK_SIZE >= skipped {
             let len = unsafe { self.0.block(T::load_unaligned(ptr.as_ptr().add(skipped))) };
             if len >= 0 {
                 return skipped + len as usize;
@@ -184,7 +223,6 @@ impl<T: SimdAlgo> SimdExecutor for UExecutor<T> {
         }
 
         // suffix
-        assert!(ptr.len() - T::BLOCK_SIZE <= skipped as usize);
         let suffix_len = unsafe {
             self.0.block(T::load_unaligned(
                 ptr.as_ptr().add(ptr.len() - T::BLOCK_SIZE),
@@ -199,10 +237,11 @@ impl<T: SimdAlgo> SimdExecutor for UExecutor<T> {
 }
 
 /// Fallback-Aligned-Fallback
-pub struct FafExecutor<T: SimdAlgo>(T);
+pub struct FafExecutor<T: SimdAlgo>(pub T);
 
 impl<T: SimdAlgo> SimdExecutor for FafExecutor<T> {
-    fn skip(&self, ptr: &[u8]) -> usize {
+    #[target_feature(enable = "ssse3")]
+    unsafe fn ssse3_skip(&self, ptr: &[u8]) -> usize {
         let (prefix, aligned, suffix) = unsafe { ptr.align_to::<T::VectorType>() };
 
         // iter prefix
@@ -334,11 +373,114 @@ impl SSEInput {
 
 #[cfg(test)]
 mod tests {
-    use crate::shufti::SSEInput;
+    use crate::shufti::{
+        FafExecutor, SSEInput, ShuftiSEE3, SimdExecutor, UExecutor, UauExecutor, UfExecutor,
+    };
+    use std::arch::x86_64::_mm_setr_epi8;
+    const BIG_INPUT: &[u8] = b" \t\n\r<root\r\n        attr=\"#value\"  > inner\tvalue </root > ";
+    const SHORT_INPUT: &[u8] = b" \t\n\r</root>";
+    const LONG_SEQ_INPUT: &[u8] = b"                                                              ";
+
+    fn new_whitespace_skipper() -> ShuftiSEE3 {
+        unsafe {
+            ShuftiSEE3 {
+                low_tbl: _mm_setr_epi8(
+                    0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x1, 0x0, 0x0, 0x1, 0x0, 0x0,
+                ),
+                high_tbl: _mm_setr_epi8(
+                    0x1, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+                ),
+            }
+        }
+    }
 
     #[test]
     fn it_works() {
-        let input = SSEInput::new(b" \t\n\r<root \t\n\rattr=\"#value\"  > inner\tvalue </root > ");
-        println!("{}", input.scan_whitespace());
+        let input = SSEInput::new(BIG_INPUT);
+        assert_eq!(4, input.scan_whitespace());
+    }
+
+    #[test]
+    fn uau_big() {
+        let executor = UauExecutor(new_whitespace_skipper());
+        let res = executor.skip(BIG_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn uf_big() {
+        let executor = UfExecutor(new_whitespace_skipper());
+        let res = executor.skip(BIG_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn u_big() {
+        let executor = UExecutor(new_whitespace_skipper());
+        let res = executor.skip(BIG_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn faf_big() {
+        let executor = FafExecutor(new_whitespace_skipper());
+        let res = executor.skip(BIG_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn uau_short() {
+        let executor = UauExecutor(new_whitespace_skipper());
+        let res = executor.skip(SHORT_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn uf_short() {
+        let executor = UfExecutor(new_whitespace_skipper());
+        let res = executor.skip(SHORT_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn u_short() {
+        let executor = UExecutor(new_whitespace_skipper());
+        let res = executor.skip(SHORT_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn faf_short() {
+        let executor = FafExecutor(new_whitespace_skipper());
+        let res = executor.skip(SHORT_INPUT);
+        assert_eq!(4, res);
+    }
+
+    #[test]
+    fn uau_long() {
+        let executor = UauExecutor(new_whitespace_skipper());
+        let res = executor.skip(LONG_SEQ_INPUT);
+        assert_eq!(62, res);
+    }
+
+    #[test]
+    fn uf_long() {
+        let executor = UfExecutor(new_whitespace_skipper());
+        let res = executor.skip(LONG_SEQ_INPUT);
+        assert_eq!(62, res);
+    }
+
+    #[test]
+    fn u_long() {
+        let executor = UExecutor(new_whitespace_skipper());
+        let res = executor.skip(LONG_SEQ_INPUT);
+        assert_eq!(62, res);
+    }
+
+    #[test]
+    fn faf_long() {
+        let executor = FafExecutor(new_whitespace_skipper());
+        let res = executor.skip(LONG_SEQ_INPUT);
+        assert_eq!(62, res);
     }
 }
