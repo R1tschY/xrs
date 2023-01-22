@@ -1,5 +1,7 @@
 use std::fmt;
+use std::io::Write;
 
+use base64::engine::general_purpose::STANDARD;
 use mime::Mime;
 use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
@@ -27,18 +29,19 @@ impl XmlRpcClientBuilder {
     {
         let mut auth = b"Basic ".to_vec();
         {
-            let mut encoder = base64::Base64Encoder::new(&mut auth, base64::STANDARD);
+            let mut encoder = base64::write::EncoderWriter::new(&mut auth, &STANDARD);
             write!(encoder, "{}:", username).unwrap();
             if let Some(password) = password {
                 write!(encoder, "{}", password).unwrap();
             }
+            encoder.finish().unwrap();
         }
 
         let mut headers = reqwest::header::HeaderMap::new();
-        let mut auth_value: HeaderValue = auth.try_into()?;
+        let mut auth_value: HeaderValue = auth.try_into().expect("invalid header value");
         auth_value.set_sensitive(true);
         headers.insert(reqwest::header::AUTHORIZATION, auth_value);
-        *self.http = self.http.default_headers(headers);
+        self.http = self.http.default_headers(headers);
         self
     }
 }
