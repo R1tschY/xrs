@@ -1,8 +1,10 @@
-use crate::{MethodResponse, XmlRpcError};
+use std::fmt;
+
 use mime::Mime;
 use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::{MethodResponse, XmlRpcError};
 
 static DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
@@ -17,7 +19,7 @@ impl XmlRpcClientBuilder {
         }
     }
 
-    #[cfg(base64)]
+    #[cfg(feature = "base64")]
     pub fn basic_auth<U, P>(mut self, username: U, password: Option<P>) -> Self
     where
         U: fmt::Display,
