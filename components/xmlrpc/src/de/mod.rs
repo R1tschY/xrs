@@ -64,7 +64,10 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
                     );
                 }
             }
-            XmlEvent::ETag(_) => break,
+            XmlEvent::ETag(etag) => {
+                debug_assert_eq!(etag.name(), "methodCall");
+                break;
+            }
             e if is_ignorable(&e) => continue,
             _ => return Err(de.error(DeReason::ExpectedElement("`methodName` or `params`"))),
         }
@@ -77,8 +80,6 @@ pub fn method_call_from_str<'de, T: Deserialize<'de>>(
         Some(params) => params,
         None => return Err(de.error(DeReason::Message("missing element: `params`".to_string()))),
     };
-
-    de.expect_end("methodCall")?;
 
     Ok(MethodCall::new(method_name, params))
 }
@@ -173,21 +174,19 @@ impl<'a> Deserializer<'a> {
     }
 
     fn next_ignore_whitespace(&mut self) -> Result<XmlEvent<'a>, Error> {
-        if let Some(e) = self.peek.take() {
-            if matches!(&e, XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace()) {
-                return Ok(e);
+        if let Some(evt) = self.peek.take() {
+            if matches!(&evt, XmlEvent::STag(_) | XmlEvent::ETag(_))
+                || matches!(&evt, XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace())
+            {
+                return Ok(evt);
             }
         }
 
         while let Some(evt) = self.reader.next()? {
-            match evt {
-                e @ (XmlEvent::STag(_) | XmlEvent::ETag(_)) => {
-                    return Ok(e);
-                }
-                XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace() => {
-                    return Ok(XmlEvent::Characters(c));
-                }
-                _ => (),
+            if matches!(&evt, XmlEvent::STag(_) | XmlEvent::ETag(_))
+                || matches!(&evt, XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace())
+            {
+                return Ok(evt);
             }
         }
 
@@ -222,7 +221,7 @@ impl<'a> Deserializer<'a> {
 
     /// Consumes Characters with terminating end tag
     fn next_scalar_str(&mut self) -> Result<Cow<'a, str>, Error> {
-        let mut result = Cow::default();
+        let mut result = Cow::<'a, str>::default();
         loop {
             match self.next()? {
                 XmlEvent::Characters(chars) => result.push_cow(chars),
@@ -861,7 +860,9 @@ impl<'a, 'de> de::Deserializer<'de> for ParamsDeserializer<'a, 'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_seq(ParamsSeqDeserializer::new(self.de))
+        let result = visitor.visit_seq(ParamsSeqDeserializer::new(self.de));
+        self.de.expect_end("params")?;
+        result
     }
 
     fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
@@ -919,8 +920,6 @@ impl<'de, 'a> de::SeqAccess<'de> for ParamsSeqDeserializer<'a, 'de> {
         &mut self,
         seed: T,
     ) -> Result<Option<T::Value>, Error> {
-        dbg!(self.de.reader.unparsed());
-
         match self.de.next_ignore_whitespace()? {
             XmlEvent::STag(e) if e.name() == "param" => {
                 self.de.next_start_name("value")?;
@@ -930,6 +929,7 @@ impl<'de, 'a> de::SeqAccess<'de> for ParamsSeqDeserializer<'a, 'de> {
             }
             XmlEvent::ETag(e) => {
                 debug_assert_eq!(e.name(), "params");
+                self.de.set_peek(XmlEvent::ETag(e));
                 Ok(None)
             }
             _ => Err(self.de.error(Reason::ExpectedElement("`param`"))),
@@ -1199,9 +1199,9 @@ mod tests {
 
         #[test]
         fn borrowed_string() {
-            let input = r#"<value><string>abc</string></value>"#;
+            let input: &'static str = r#"<value><string>abc</string></value>"#;
 
-            let actual: &str = value_from_str(input).unwrap();
+            let actual: &'static str = value_from_str(input).unwrap();
 
             assert_eq!(actual, "abc")
         }
