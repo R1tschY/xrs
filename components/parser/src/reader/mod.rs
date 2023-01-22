@@ -177,7 +177,7 @@ impl<'a, R: EntityStrValueResolver<'a>> Parser<'a> for AttValueToken<R> {
             }
         }
 
-        Err(XmlError::ExpectedAttrValue)
+        Err(XmlError::ExpectToken("quote or single quote"))
     }
 }
 
@@ -228,7 +228,7 @@ impl<'a, R: EntityStrValueResolver<'a>> AttValueToken<R> {
             }
         }
 
-        return Err(XmlError::ExpectedAttrValue);
+        return Err(XmlError::UnexpectedEof);
     }
 }
 

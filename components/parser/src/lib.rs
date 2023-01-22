@@ -263,7 +263,6 @@ pub enum XmlError {
     ExpectedElementStart,
     ExpectedElementEnd,
     ExpectedAttrName,
-    ExpectedAttrValue,
     ExpectedEquals,
     ExpectedDocumentEnd,
     Expected(Box<[XmlErrorAtom]>),
