@@ -396,11 +396,12 @@ impl<'i> SimpleXmlParser<'i> {
 
         self.version = Some(decl.version.to_string());
 
-        if let Some(encoding) = &decl.encoding {
-            if !encoding.eq_ignore_ascii_case("UTF-8") {
-                return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
-            }
-        }
+        // TODO: handle encoding better
+        // if let Some(encoding) = &decl.encoding {
+        //     if !encoding.eq_ignore_ascii_case("UTF-8") {
+        //         return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
+        //     }
+        // }
 
         self.commit(cursor);
         visitor.visit_declaration(decl)

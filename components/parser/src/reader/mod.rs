@@ -728,11 +728,12 @@ trait InternalXmlParser<'a> {
         self.set_version(decl.version.to_string());
         doc.standalone = decl.standalone;
 
-        if let Some(encoding) = &decl.encoding {
-            if !encoding.eq_ignore_ascii_case("UTF-8") {
-                return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
-            }
-        }
+        // TODO: handle encoding better
+        // if let Some(encoding) = &decl.encoding {
+        //     if !encoding.eq_ignore_ascii_case("UTF-8") {
+        //         return Err(XmlError::UnsupportedEncoding(encoding.to_string()));
+        //     }
+        // }
 
         self.set_cursor(cursor);
         Ok(Some(XmlEvent::XmlDecl(decl)))
