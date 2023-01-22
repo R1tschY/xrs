@@ -4,6 +4,7 @@ use std::io::Write;
 use base64::engine::general_purpose::STANDARD;
 use mime::Mime;
 use reqwest::header::HeaderValue;
+use reqwest::{IntoUrl, Url};
 use serde::{Deserialize, Serialize};
 
 use crate::{MethodResponse, XmlRpcError};
@@ -11,13 +12,22 @@ use crate::{MethodResponse, XmlRpcError};
 static DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 pub struct XmlRpcClientBuilder {
+    url: reqwest::Result<Url>,
     http: reqwest::ClientBuilder,
 }
 
 impl XmlRpcClientBuilder {
-    pub fn new() -> Self {
+    pub fn new(url: impl IntoUrl) -> Self {
         Self {
+            url: url.into_url(),
             http: reqwest::ClientBuilder::default().user_agent(DEFAULT_USER_AGENT),
+        }
+    }
+
+    pub fn from_client_builder(url: impl IntoUrl, client_builder: reqwest::ClientBuilder) -> Self {
+        Self {
+            url: url.into_url(),
+            http: client_builder,
         }
     }
 
@@ -44,21 +54,21 @@ impl XmlRpcClientBuilder {
         self.http = self.http.default_headers(headers);
         self
     }
+
+    pub fn build(self) -> Result<XmlRpcClient, XmlRpcError> {
+        Ok(XmlRpcClient {
+            url: self.url?,
+            http: self.http.build()?,
+        })
+    }
 }
 
 pub struct XmlRpcClient {
+    url: Url,
     http: reqwest::Client,
-    url: String,
 }
 
 impl XmlRpcClient {
-    pub fn new(url: &str) -> Self {
-        Self {
-            http: reqwest::Client::new(),
-            url: url.to_string(),
-        }
-    }
-
     pub async fn list_methods(&self, buf: &mut String) -> Result<Vec<String>, XmlRpcError> {
         self.call("system.listMethods", &(), buf).await
     }
@@ -89,12 +99,8 @@ impl XmlRpcClient {
         let call = crate::ser::method_call_to_string(method_name, params)?;
         let res = self
             .http
-            .post(&self.url)
+            .post(self.url.clone())
             .header(reqwest::header::CONTENT_TYPE, "test/xml;charset=utf-8")
-            .header(
-                reqwest::header::USER_AGENT,
-                format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
-            )
             .body(call)
             .send()
             .await?;
