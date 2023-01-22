@@ -1,10 +1,11 @@
-use crate::simple::{AttributeAccess, CowVisitor, SimpleXmlParser, SimpleXmlVisitor, StrVisitor};
-use crate::{XmlDecl, XmlError};
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Formatter, Write};
 use std::rc::Rc;
 use std::sync::Arc;
+
+use crate::simple::{AttributeAccess, CowVisitor, SimpleXmlParser, SimpleXmlVisitor, StrVisitor};
+use crate::{XmlDecl, XmlError};
 
 pub const XML_URI: &str = "http://www.w3.org/XML/1998/namespace";
 pub const XMLNS_URI: &str = "http://www.w3.org/2000/xmlns/";
@@ -283,6 +284,10 @@ struct QNameStrVisitor;
 impl<'i> StrVisitor<'i> for QNameStrVisitor {
     type Value = QName<'i>;
 
+    fn visit_str(self, value: &str) -> Result<Self::Value, XmlError> {
+        unreachable!()
+    }
+
     fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
         QName::from_str(value)
     }
@@ -482,8 +487,9 @@ impl<'i, 'a> NamespaceStackScopeBuilder<'i, 'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::simple::StringVisitor;
+
+    use super::*;
 
     #[derive(Debug)]
     enum XmlEvent<'i> {

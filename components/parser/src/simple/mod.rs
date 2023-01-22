@@ -2,8 +2,6 @@ use std::borrow::Cow;
 
 use xrs_chars::{XmlAsciiChar, XmlChar};
 
-mod namespace;
-
 use crate::parser::core::optional;
 use crate::parser::Parser;
 use crate::reader::chars::is_ascii_content_char;
@@ -13,6 +11,8 @@ use crate::reader::{
 };
 use crate::XmlError::{UnexpectedCharacter, UnexpectedEof};
 use crate::{Cursor, XmlDecl, XmlDtdError, XmlError, XmlErrorAtom};
+
+mod namespace;
 
 pub trait SimpleXmlVisitor<'i>: Sized {
     type Value;
@@ -64,12 +64,20 @@ pub struct CowVisitor;
 impl<'i> StrVisitor<'i> for CowVisitor {
     type Value = Cow<'i, str>;
 
+    fn visit_str(self, value: &str) -> Result<Self::Value, XmlError> {
+        Ok(Cow::Owned(value.to_string()))
+    }
+
     fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
         Ok(Cow::Borrowed(value))
     }
 
     fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
         Ok(Cow::Owned(value))
+    }
+
+    fn visit_cow(self, value: Cow<'i, str>) -> Result<Self::Value, XmlError> {
+        Ok(value)
     }
 }
 
@@ -78,7 +86,7 @@ pub struct StringVisitor;
 impl<'i> StrVisitor<'i> for StringVisitor {
     type Value = String;
 
-    fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
+    fn visit_str(self, value: &str) -> Result<Self::Value, XmlError> {
         Ok(value.to_string())
     }
 
@@ -646,28 +654,6 @@ mod tests {
         }
     }
 
-    struct CowVisitor;
-
-    impl<'i> StrVisitor<'i> for CowVisitor {
-        type Value = Cow<'i, str>;
-
-        fn visit_str(self, value: &str) -> Result<Self::Value, XmlError> {
-            Ok(Cow::Owned(value.to_string()))
-        }
-
-        fn visit_borrowed(self, value: &'i str) -> Result<Self::Value, XmlError> {
-            Ok(Cow::Borrowed(value))
-        }
-
-        fn visit_string(self, value: String) -> Result<Self::Value, XmlError> {
-            Ok(Cow::Owned(value))
-        }
-
-        fn visit_cow(self, value: Cow<'i, str>) -> Result<Self::Value, XmlError> {
-            Ok(value)
-        }
-    }
-
     mod stag {
         use crate::simple::SimpleXmlParser;
 
@@ -785,19 +771,24 @@ mod tests {
         #[test]
         fn attribute_missing_value() {
             let mut parser = SimpleXmlParser::from_str("<e a></e>");
-            assert_evt!(Err(XmlError::ExpectedAttrValue), parser);
+            assert_evt!(Err(XmlError::ExpectToken("=")), parser);
         }
 
         #[test]
         fn attribute_wrong_quote() {
             let mut parser = SimpleXmlParser::from_str("<e a='v\"></e>");
-            assert_evt!(Err(XmlError::ExpectToken("single quote")), parser);
+            assert_evt!(
+                Err(XmlError::IllegalAttributeValue(
+                    "< not allowed in attribute value"
+                )),
+                parser
+            );
         }
 
         #[test]
         fn attribute_missing_quote() {
             let mut parser = SimpleXmlParser::from_str("<e a=v></e>");
-            assert_evt!(Err(XmlError::ExpectToken("quote")), parser);
+            assert_evt!(Err(XmlError::ExpectToken("quote or single quote")), parser);
         }
     }
 
