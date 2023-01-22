@@ -268,12 +268,12 @@ impl<'a> Deserializer<'a> {
         self.peek = Some(evt);
     }
 
-    fn read_int<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+    fn read_int<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let result = self.next_scalar_str()?.parse();
         visitor.visit_i32(self.fix_result(result)?)
     }
 
-    fn read_boolean<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+    fn read_boolean<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         match self.next_scalar_str()?.as_ref() {
             "0" => visitor.visit_bool(false),
             "1" => visitor.visit_bool(true),
@@ -281,19 +281,19 @@ impl<'a> Deserializer<'a> {
         }
     }
 
-    fn read_string<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+    fn read_string<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         match self.next_scalar_str()? {
-            Cow::Borrowed(borrowed) => visitor.visit_str(borrowed),
+            Cow::Borrowed(borrowed) => visitor.visit_borrowed_str(borrowed),
             Cow::Owned(owned) => visitor.visit_string(owned),
         }
     }
 
-    fn read_double<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+    fn read_double<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let result = self.next_scalar_str()?.parse();
         visitor.visit_f64(self.fix_result(result)?)
     }
 
-    fn read_date_time_iso8601<'de, V: de::Visitor<'de>>(
+    fn read_date_time_iso8601<V: de::Visitor<'a>>(
         &mut self,
         visitor: V,
     ) -> Result<V::Value, Error> {
@@ -301,13 +301,13 @@ impl<'a> Deserializer<'a> {
         visitor.visit_newtype_struct(text.into_deserializer())
     }
 
-    fn read_base64<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+    fn read_base64<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let text = self.next_scalar_str()?;
         let base64 = base64::decode(text.as_ref()).map_err(|err| self.fix_position(err.into()))?;
         visitor.visit_byte_buf(base64)
     }
 
-    fn read_nil<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+    fn read_nil<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let text = self.next_scalar_str()?;
         if text.is_empty() {
             visitor.visit_unit()
