@@ -2,6 +2,7 @@ use std::fmt;
 use std::io::Write;
 
 use base64::engine::general_purpose::STANDARD;
+use log::debug;
 use mime::Mime;
 use reqwest::header::HeaderValue;
 use reqwest::{IntoUrl, Url};
@@ -97,6 +98,7 @@ impl XmlRpcClient {
         buffer: &'a mut String,
     ) -> Result<U, XmlRpcError> {
         let call = crate::ser::method_call_to_string(method_name, params)?;
+        debug!("request: {}", call);
         let res = self
             .http
             .post(self.url.clone())
@@ -125,6 +127,7 @@ impl XmlRpcClient {
         }
 
         let content = res.text().await?;
+        debug!("response: {}", content);
         *buffer = content;
         match crate::de::method_response_from_str(buffer)? {
             MethodResponse::Success(result) => Ok(result),
