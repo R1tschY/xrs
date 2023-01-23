@@ -162,11 +162,11 @@ impl<'a> Deserializer<'a> {
         }
 
         while let Some(evt) = self.reader.next()? {
-            match evt {
-                e @ (XmlEvent::STag(_) | XmlEvent::ETag(_) | XmlEvent::Characters(_)) => {
-                    return Ok(e);
-                }
-                _ => (),
+            if matches!(
+                &evt,
+                XmlEvent::STag(_) | XmlEvent::ETag(_) | XmlEvent::Characters(_)
+            ) {
+                return Ok(evt);
             }
         }
 
@@ -175,9 +175,7 @@ impl<'a> Deserializer<'a> {
 
     fn next_ignore_whitespace(&mut self) -> Result<XmlEvent<'a>, Error> {
         if let Some(evt) = self.peek.take() {
-            if matches!(&evt, XmlEvent::STag(_) | XmlEvent::ETag(_))
-                || matches!(&evt, XmlEvent::Characters(c) if !c.as_ref().is_xml_whitespace())
-            {
+            if !matches!(&evt, XmlEvent::Characters(c) if c.as_ref().is_xml_whitespace()) {
                 return Ok(evt);
             }
         }
@@ -281,6 +279,11 @@ impl<'a> Deserializer<'a> {
         }
     }
 
+    fn read_char<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+        let result = self.next_scalar_str()?.parse();
+        visitor.visit_char::<Error>(self.fix_result(result)?)
+    }
+
     fn read_string<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
         match self.next_scalar_str()? {
             Cow::Borrowed(borrowed) => visitor.visit_borrowed_str(borrowed),
@@ -382,6 +385,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 "dateTime.iso8601" => self.read_date_time_iso8601(visitor),
                 _ => Err(self.error(Reason::UnknownType(stag.name.to_string()))),
             },
+            evt @ XmlEvent::Characters(_) => {
+                self.set_peek(evt);
+                self.read_string(visitor)
+            }
             _ => Err(self.error(Reason::ValueExpected)),
         }?;
         self.expect_end("value")?;
@@ -412,18 +419,37 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     }
 
     fn deserialize_char<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        self.next_type("string")?;
-        let result = self.next_scalar_str()?.parse();
-        let res = visitor.visit_char::<Error>(self.fix_result(result)?)?;
-        self.expect_end("value")?;
-        Ok(res)
+        match self.next_ignore_whitespace()? {
+            evt @ XmlEvent::STag(_) => {
+                self.set_peek(evt);
+                self.next_type("string")?;
+                let res = self.read_char(visitor)?;
+                self.expect_end("value")?;
+                Ok(res)
+            }
+            evt @ XmlEvent::Characters(_) => {
+                self.set_peek(evt);
+                self.read_char(visitor)
+            }
+            _ => Err(self.error(Reason::ValueExpected)),
+        }
     }
 
     fn deserialize_str<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        self.next_type("string")?;
-        let res = self.read_string(visitor)?;
-        self.expect_end("value")?;
-        Ok(res)
+        match self.next_ignore_whitespace()? {
+            evt @ XmlEvent::STag(_) => {
+                self.set_peek(evt);
+                self.next_type("string")?;
+                let res = self.read_string(visitor)?;
+                self.expect_end("value")?;
+                Ok(res)
+            }
+            evt @ XmlEvent::Characters(_) => {
+                self.set_peek(evt);
+                self.read_string(visitor)
+            }
+            _ => Err(self.error(Reason::ValueExpected)),
+        }
     }
 
     fn deserialize_string<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -546,7 +572,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Error> {
-        let res = match self.next()? {
+        let res = match self.next_ignore_whitespace()? {
             XmlEvent::STag(stag) => match stag.name.as_ref() {
                 "i4" | "int" => {
                     let var = self.next_scalar_str()?;
@@ -565,6 +591,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                     stag.name.to_string(),
                 ))),
             },
+            evt @ XmlEvent::Characters(_) => {
+                self.set_peek(evt);
+                self.read_string(visitor)
+            }
             _ => Err(self.error(Reason::ValueExpected)),
         }?;
         self.expect_end("value")?;
@@ -1198,6 +1228,33 @@ mod tests {
         }
 
         #[test]
+        fn composed_string() {
+            let input = r#"<value><string>a<!--Comment-->b<?php?>c</string></value>"#;
+
+            let actual: String = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "abc".to_string())
+        }
+
+        #[test]
+        fn implicit_string() {
+            let input: &'static str = r#"<value>abc</value>"#;
+
+            let actual: &'static str = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "abc".to_string())
+        }
+
+        #[test]
+        fn composed_implicit_string() {
+            let input = r#"<value>a<!--Comment-->b<?php?>c</value>"#;
+
+            let actual: String = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "abc".to_string())
+        }
+
+        #[test]
         fn borrowed_string() {
             let input: &'static str = r#"<value><string>abc</string></value>"#;
 
@@ -1437,6 +1494,22 @@ mod tests {
             expected.insert("_1".to_string(), Value::Int(1));
             expected.insert("_2".to_string(), Value::Int(2));
             assert_eq!(actual, expected)
+        }
+    }
+
+    mod real_world_examples {
+        use crate::de::method_response_from_str;
+        use crate::MethodResponse;
+
+        #[test]
+        fn method_list() {
+            let input = r#"<?xml version="1.0" encoding="ISO-8859-1"?><methodResponse><params><param><value><array><data><value>getLinkPeers</value></data></array></value></param></params></methodResponse>"#;
+            let actual: MethodResponse<Vec<String>> = method_response_from_str(input).unwrap();
+            if let MethodResponse::Success(list) = actual {
+                assert_eq!(vec!["getLinkPeers".to_string()], list)
+            } else {
+                assert!(false)
+            }
         }
     }
 
