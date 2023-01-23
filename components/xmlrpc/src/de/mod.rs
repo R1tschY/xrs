@@ -389,6 +389,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 self.set_peek(evt);
                 self.read_string(visitor)
             }
+            XmlEvent::ETag(etag) => {
+                debug_assert_eq!(etag.name(), "value");
+                return visitor.visit_borrowed_str("");
+            }
             _ => Err(self.error(Reason::ValueExpected)),
         }?;
         self.expect_end("value")?;
@@ -431,6 +435,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 self.set_peek(evt);
                 self.read_char(visitor)
             }
+            XmlEvent::ETag(etag) => {
+                debug_assert_eq!(etag.name(), "value");
+                return visitor.visit_borrowed_str("");
+            }
             _ => Err(self.error(Reason::ValueExpected)),
         }
     }
@@ -447,6 +455,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             evt @ XmlEvent::Characters(_) => {
                 self.set_peek(evt);
                 self.read_string(visitor)
+            }
+            XmlEvent::ETag(etag) => {
+                debug_assert_eq!(etag.name(), "value");
+                return visitor.visit_borrowed_str("");
             }
             _ => Err(self.error(Reason::ValueExpected)),
         }
@@ -594,6 +606,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             evt @ XmlEvent::Characters(_) => {
                 self.set_peek(evt);
                 self.read_string(visitor)
+            }
+            XmlEvent::ETag(etag) => {
+                debug_assert_eq!(etag.name(), "value");
+                return visitor.visit_borrowed_str("");
             }
             _ => Err(self.error(Reason::ValueExpected)),
         }?;
@@ -1271,6 +1287,33 @@ mod tests {
 
             assert_eq!(actual, " \t\n")
         }
+
+        #[test]
+        fn empty_string() {
+            let input = r#"<value><string><!----><?php?><!----></string></value>"#;
+
+            let actual: String = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "".to_string())
+        }
+
+        #[test]
+        fn implicit_empty_string() {
+            let input = r#"<value></value>"#;
+
+            let actual: String = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "".to_string())
+        }
+
+        #[test]
+        fn implicit_empty_string_with_comment() {
+            let input = r#"<value><!----><?php?><!----></value>"#;
+
+            let actual: String = value_from_str(input).unwrap();
+
+            assert_eq!(actual, "".to_string())
+        }
     }
 
     mod boolean_value {
@@ -1498,8 +1541,9 @@ mod tests {
     }
 
     mod real_world_examples {
-        use crate::de::method_response_from_str;
         use crate::MethodResponse;
+
+        use super::*;
 
         #[test]
         fn method_list() {
