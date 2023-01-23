@@ -622,8 +622,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     }
 
     fn deserialize_ignored_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        let mut depth = 1;
-        while depth >= 0 {
+        let mut depth = 1usize;
+        while depth > 0 {
             match self.next()? {
                 XmlEvent::STag(_) => depth += 1,
                 XmlEvent::ETag(_) => depth -= 1,
@@ -1537,6 +1537,42 @@ mod tests {
             expected.insert("_1".to_string(), Value::Int(1));
             expected.insert("_2".to_string(), Value::Int(2));
             assert_eq!(actual, expected)
+        }
+    }
+
+    mod ignore_any {
+        use serde::de::IgnoredAny;
+
+        use super::*;
+
+        #[test]
+        fn empty() {
+            let input = r#"<value></value>"#;
+
+            assert!(value_from_str::<IgnoredAny>(input).is_ok());
+        }
+
+        #[test]
+        fn implicit_string() {
+            let input = r#"<value>abc</value>"#;
+
+            assert!(value_from_str::<IgnoredAny>(input).is_ok());
+        }
+
+        #[test]
+        fn complex() {
+            let input = r#"<value><struct>
+                    <member>
+                        <name>_1</name>
+                        <value><int>1</int></value>
+                    </member>
+                    <member>
+                        <name>_2</name>
+                        <value><int>2</int></value>
+                    </member>
+                </struct></value>"#;
+
+            assert!(value_from_str::<IgnoredAny>(input).is_ok());
         }
     }
 
