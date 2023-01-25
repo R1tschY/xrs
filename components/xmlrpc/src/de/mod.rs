@@ -539,6 +539,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         let res = visitor
             .visit_seq(ArrayDeserializer::new(self)?)
             .map_err(|err| self.fix_position(err))?;
+        self.expect_end("data")?; // TODO: map to `more elements as expected` error
+        self.expect_end("array")?;
         self.expect_end("value")?;
         Ok(res)
     }
@@ -767,12 +769,12 @@ impl<'de, 'a> de::SeqAccess<'de> for ArrayDeserializer<'a, 'de> {
         &mut self,
         seed: T,
     ) -> Result<Option<T::Value>, Error> {
-        match self.de.next_maybe_start() {
-            Ok(Some(stag)) if stag.name.as_ref() == "value" => {
+        match self.de.next_ignore_whitespace()? {
+            XmlEvent::STag(stag) if stag.name.as_ref() == "value" => {
                 seed.deserialize(&mut *self.de).map(Some)
             }
-            Ok(None) => {
-                self.de.expect_end("array")?;
+            evt @ XmlEvent::ETag(_) => {
+                self.de.set_peek(evt);
                 Ok(None)
             }
             _ => return Err(self.de.error(Reason::ExpectedElement("value"))),
