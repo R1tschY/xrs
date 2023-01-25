@@ -268,7 +268,7 @@ impl<'de> Visitor<'de> for ValueDeserializeVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for Value<'de> {
+impl<'de: 'a, 'a> Deserialize<'de> for Value<'a> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
