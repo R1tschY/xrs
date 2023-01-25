@@ -687,13 +687,13 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
         } else {
             // <value>
             self.de.next_start_name("value")?;
-            seed.deserialize(&mut *self.de)
+            seed.deserialize(&mut *self.de)?
         };
 
         // </member>
         self.de.expect_end("member")?;
 
-        res
+        Ok(res)
     }
 
     fn next_entry_seed<K, V>(
