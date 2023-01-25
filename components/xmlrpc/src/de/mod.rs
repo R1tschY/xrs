@@ -400,7 +400,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             },
             evt @ XmlEvent::Characters(_) => {
                 self.set_peek(evt);
-                self.read_string(visitor)
+                return self.read_string(visitor);
             }
             XmlEvent::ETag(etag) => {
                 debug_assert_eq!(etag.name(), "value");
@@ -1324,6 +1324,33 @@ mod tests {
             let actual: String = value_from_str(input).unwrap();
 
             assert_eq!(actual, "".to_string())
+        }
+
+        #[test]
+        fn string_as_any() {
+            let input = r#"<value><string>abc</string></value>"#;
+
+            let actual: Value = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Value::String("abc".into()))
+        }
+
+        #[test]
+        fn implicit_string_as_any() {
+            let input = r#"<value>abc</value>"#;
+
+            let actual: Value = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Value::String("abc".into()))
+        }
+
+        #[test]
+        fn implicit_empty_string_as_any() {
+            let input = r#"<value></value>"#;
+
+            let actual: Value = value_from_str(input).unwrap();
+
+            assert_eq!(actual, Value::String("".into()))
         }
     }
 
