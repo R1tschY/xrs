@@ -319,6 +319,23 @@ impl<'a> Deserializer<'a> {
         }
     }
 
+    fn read_struct<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+        let res = visitor
+            .visit_map(StructDeserializer::new(self))
+            .map_err(|err| self.fix_position(err))?;
+        self.expect_end("struct")?; // TODO: map to `more elements as expected` error
+        Ok(res)
+    }
+
+    fn read_array<V: de::Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value, Error> {
+        let res = visitor
+            .visit_seq(ArrayDeserializer::new(self)?)
+            .map_err(|err| self.fix_position(err))?;
+        self.expect_end("data")?; // TODO: map to `more elements as expected` error
+        self.expect_end("array")?;
+        Ok(res)
+    }
+
     fn next_type(&mut self, ty: &'static str) -> Result<(), Error> {
         match self.next_ignore_whitespace()? {
             XmlEvent::STag(stag) => {
@@ -376,12 +393,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 "string" => self.read_string(visitor),
                 "double" => self.read_double(visitor),
                 "base64" => self.read_base64(visitor),
-                "struct" => visitor
-                    .visit_map(StructDeserializer::new(self))
-                    .map_err(|err| self.fix_position(err)),
-                "array" => visitor
-                    .visit_seq(ArrayDeserializer::new(self)?)
-                    .map_err(|err| self.fix_position(err)),
+                "struct" => self.read_struct(visitor),
+                "array" => self.read_array(visitor),
                 "dateTime.iso8601" => self.read_date_time_iso8601(visitor),
                 _ => Err(self.error(Reason::UnknownType(stag.name.to_string()))),
             },
@@ -536,11 +549,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("array")?;
-        let res = visitor
-            .visit_seq(ArrayDeserializer::new(self)?)
-            .map_err(|err| self.fix_position(err))?;
-        self.expect_end("data")?; // TODO: map to `more elements as expected` error
-        self.expect_end("array")?;
+        let res = self.read_array(visitor)?;
         self.expect_end("value")?;
         Ok(res)
     }
@@ -564,9 +573,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.next_type("struct")?;
-        let res = visitor
-            .visit_map(StructDeserializer::new(self))
-            .map_err(|err| self.fix_position(err))?;
+        let res = self.read_struct(visitor)?;
         self.expect_end("value")?;
         Ok(res)
     }
@@ -659,6 +666,7 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
             XmlEvent::STag(e) if e.name() == "member" => {}
             XmlEvent::ETag(e) => {
                 debug_assert_eq!(e.name(), "struct");
+                self.de.set_peek(XmlEvent::ETag(e));
                 return Ok(None);
             }
             _ => return Err(self.de.error(Reason::ExpectedElement("`member`"))),
@@ -709,6 +717,7 @@ impl<'a, 'de> de::MapAccess<'de> for StructDeserializer<'a, 'de> {
             XmlEvent::STag(e) if e.name() == "member" => {}
             XmlEvent::ETag(e) => {
                 debug_assert_eq!(e.name(), "struct");
+                self.de.set_peek(XmlEvent::ETag(e));
                 return Ok(None);
             }
             _ => return Err(self.de.error(Reason::ExpectedElement("`member`"))),
