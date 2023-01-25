@@ -1629,6 +1629,229 @@ mod tests {
                 assert!(false)
             }
         }
+
+        #[test]
+        fn device_list() {
+            #[derive(Deserialize, Debug)]
+            pub struct DeviceDescription {
+                /// Type of device
+                #[serde(rename = "TYPE")]
+                pub ty: String,
+
+                /// Address of channel or device
+                #[serde(rename = "ADDRESS")]
+                pub address: String,
+
+                /// Radio address of device
+                ///
+                /// Only for devices.
+                #[serde(rename = "RF_ADDRESS")]
+                pub rf_address: Option<i32>,
+
+                /// Addresses of the child channels.
+                #[serde(rename = "CHILDREN", default)]
+                pub children: Vec<String>,
+
+                /// Address of parent device
+                ///
+                /// Empty on devices.
+                #[serde(rename = "PARENT")]
+                pub parent: String,
+
+                /// Type (short name) of the parent device.
+                ///
+                /// Only for devices.
+                #[serde(rename = "PARENT_TYPE")]
+                pub parent_type: Option<String>,
+
+                /// Specifies the channel number.
+                ///
+                /// Only for devices.
+                #[serde(rename = "INDEX")]
+                pub index: Option<i32>,
+
+                /// Indicates whether secured transmission is enabled for the channel.
+                #[serde(rename = "AES_ACTIVE")]
+                pub aes_active: Option<i32>,
+
+                /// List of the names of the existing parameter sets.
+                #[serde(rename = "PARAMSETS")]
+                pub paramsets: Vec<String>,
+
+                /// Firmware version of the device.
+                ///
+                /// Only for devices. Optional.
+                #[serde(rename = "FIRMWARE")]
+                pub firmware: Option<String>,
+            }
+
+            let input = r#"<?xml version="1.0" encoding="iso-8859-1"?>
+<methodResponse>
+    <params>
+        <param>
+            <value>
+                <array>
+                    <data>
+                        <value>
+                            <struct>
+                                <member>
+                                    <name>ADDRESS</name>
+                                    <value>BidCoS-RF</value>
+                                </member>
+                                <member>
+                                    <name>CHILDREN</name>
+                                    <value>
+                                        <array>
+                                            <data>
+                                                <value>BidCoS-RF:0</value>
+                                                <value>BidCoS-RF:1</value>
+                                            </data>
+                                        </array>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>FIRMWARE</name>
+                                    <value>3.65.11</value>
+                                </member>
+                                <member>
+                                    <name>FLAGS</name>
+                                    <value>
+                                        <i4>9</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>INTERFACE</name>
+                                    <value>SEQ2104747</value>
+                                </member>
+                                <member>
+                                    <name>PARAMSETS</name>
+                                    <value>
+                                        <array>
+                                            <data>
+                                                <value>MASTER</value>
+                                            </data>
+                                        </array>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>PARENT</name>
+                                    <value></value>
+                                </member>
+                                <member>
+                                    <name>RF_ADDRESS</name>
+                                    <value>
+                                        <i4>7770759</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>ROAMING</name>
+                                    <value>
+                                        <i4>0</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>RX_MODE</name>
+                                    <value>
+                                        <i4>1</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>TYPE</name>
+                                    <value>HM-RCV-50</value>
+                                </member>
+                                <member>
+                                    <name>UPDATABLE</name>
+                                    <value>
+                                        <i4>0</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>VERSION</name>
+                                    <value>
+                                        <i4>6</i4>
+                                    </value>
+                                </member>
+                            </struct>
+                        </value>
+                        <value>
+                            <struct>
+                                <member>
+                                    <name>ADDRESS</name>
+                                    <value>BidCoS-RF:0</value>
+                                </member>
+                                <member>
+                                    <name>AES_ACTIVE</name>
+                                    <value>
+                                        <i4>0</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>DIRECTION</name>
+                                    <value>
+                                        <i4>0</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>FLAGS</name>
+                                    <value>
+                                        <i4>3</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>INDEX</name>
+                                    <value>
+                                        <i4>0</i4>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>LINK_SOURCE_ROLES</name>
+                                    <value></value>
+                                </member>
+                                <member>
+                                    <name>LINK_TARGET_ROLES</name>
+                                    <value></value>
+                                </member>
+                                <member>
+                                    <name>PARAMSETS</name>
+                                    <value>
+                                        <array>
+                                            <data>
+                                                <value>MASTER</value>
+                                                <value>VALUES</value>
+                                            </data>
+                                        </array>
+                                    </value>
+                                </member>
+                                <member>
+                                    <name>PARENT</name>
+                                    <value>BidCoS-RF</value>
+                                </member>
+                                <member>
+                                    <name>PARENT_TYPE</name>
+                                    <value>HM-RCV-50</value>
+                                </member>
+                                <member>
+                                    <name>TYPE</name>
+                                    <value>MAINTENANCE</value>
+                                </member>
+                                <member>
+                                    <name>VERSION</name>
+                                    <value>
+                                        <i4>6</i4>
+                                    </value>
+                                </member>
+                            </struct>
+                        </value>
+                    </data>
+                </array>
+            </value>
+        </param>
+    </params>
+</methodResponse>"#;
+            let actual: MethodResponse<Vec<DeviceDescription>> =
+                method_response_from_str(input).unwrap();
+            assert!(matches!(actual, MethodResponse::Success(_)));
+        }
     }
 
     // TODO: tuple, vec, enum value
