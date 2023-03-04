@@ -214,7 +214,7 @@ impl<'a> Deserializer<'a> {
 
     /// Consumes Characters with terminating end tag
     fn next_text(&mut self) -> Result<Cow<'a, str>, Error> {
-        let mut result = Cow::from(String::new());
+        let mut result = Cow::<'a, str>::default();
         loop {
             match self.next()? {
                 XmlEvent::Characters(chars) => {
@@ -379,9 +379,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     }
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        visitor
+        let result = visitor
             .visit_seq(seq::SeqAccess::new(self, None)?)
-            .map_err(|err| self.fix_position(err))
+            .map_err(|err| self.fix_position(err));
+        if let XmlEvent::ETag(_) = self.next()? {
+            result
+        } else {
+            Err(self.error(Reason::EndOfArrayExpected))
+        }
     }
 
     fn deserialize_tuple<V: de::Visitor<'de>>(
@@ -389,9 +394,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         len: usize,
         visitor: V,
     ) -> Result<V::Value, Error> {
-        visitor
+        let result = visitor
             .visit_seq(seq::SeqAccess::new(self, Some(len))?)
-            .map_err(|err| self.fix_position(err))
+            .map_err(|err| self.fix_position(err));
+        if let XmlEvent::ETag(_) = self.next()? {
+            result
+        } else {
+            Err(self.error(Reason::EndOfArrayExpected))
+        }
     }
 
     fn deserialize_tuple_struct<V: de::Visitor<'de>>(

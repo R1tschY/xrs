@@ -1,7 +1,7 @@
 use std::fmt;
+use std::num::{ParseFloatError, ParseIntError};
 use std::result::Result as StdResult;
 
-use std::num::{ParseFloatError, ParseIntError};
 use xrs_parser::XmlError;
 
 /// Alias for a `Result` with the error type `serde_explicit_xml::Error`.
@@ -60,6 +60,8 @@ pub(crate) enum Reason {
     NoMarkupExpected,
     /// Unexpected characters
     MarkupExpected,
+    /// More array elements than expected
+    EndOfArrayExpected,
     /// Expecting Start event
     Start,
     /// Expecting End event
@@ -92,6 +94,7 @@ impl fmt::Display for Reason {
             Reason::MarkupExpected => write!(f, "Expecting only markup"),
             Reason::RootStruct => write!(f, "Can only deserialize struct on root level"),
             Reason::Tag(tag) => write!(f, "Expecting start tag <{} ...>", tag),
+            Reason::EndOfArrayExpected => write!(f, "Expected end of element array"),
         }
     }
 }
