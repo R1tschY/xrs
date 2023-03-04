@@ -193,5 +193,5 @@ pub fn tab_indent(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, /*one_space, indent,*/ big_indent, /*tab_indent*/);
+criterion_group!(benches, one_space, indent, big_indent, tab_indent);
 criterion_main!(benches);

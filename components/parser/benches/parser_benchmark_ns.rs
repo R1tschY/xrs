@@ -162,5 +162,5 @@ pub fn xhtml_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, gpx_benchmark, xhtml_benchmark, atom_benchmark);
-criterion_main!(benches);
+criterion_group!(benches_ns, gpx_benchmark, xhtml_benchmark, atom_benchmark);
+criterion_main!(benches_ns);
