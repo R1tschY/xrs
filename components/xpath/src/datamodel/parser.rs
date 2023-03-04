@@ -53,7 +53,7 @@ impl DomBuilder {
                 XmlNsEvent::Characters(cdata) => {
                     if let Some(top) = stack.last_mut() {
                         if let Some(Child::Text(ref mut text)) = top.children.last_mut() {
-                            text.push_str(&cdata);
+                            text.push_cow(cdata);
                         } else {
                             top.children.push(Child::Text(cdata));
                         }
