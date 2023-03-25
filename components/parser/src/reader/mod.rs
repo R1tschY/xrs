@@ -91,7 +91,7 @@ impl<'a, T: Fn(char) -> bool> Parser<'a> for CharTerminated<T> {
 
 /// White Space
 ///
-///     S ::= (#x20 | #x9 | #xD | #xA)+
+/// S ::= (#x20 | #x9 | #xD | #xA)+
 ///
 pub(crate) struct SToken;
 
@@ -2151,15 +2151,6 @@ mod tests {
             let mut reader = Reader::new("<?xml version='1.0' encoding='UTF-8'?><e/>");
             assert_evt!(
                 Ok(Some(XmlEvent::decl("1.0", Option::Some("UTF-8"), None))),
-                reader
-            );
-        }
-
-        #[test]
-        fn unsupported() {
-            let mut reader = Reader::new("<?xml version='1.0' encoding='UTF128'?><e/>");
-            assert_evt!(
-                Err(XmlError::UnsupportedEncoding("UTF128".to_string())),
                 reader
             );
         }

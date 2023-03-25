@@ -95,7 +95,7 @@ impl Namespace {
     }
 }
 
-/// Visitor for SimpleNXmlParser
+/// Visitor for SimpleNsXmlParser
 pub trait SimpleNsXmlVisitor<'i>: Sized {
     type Value;
 

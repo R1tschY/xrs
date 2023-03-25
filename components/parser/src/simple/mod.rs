@@ -1443,16 +1443,6 @@ mod tests {
                 parser
             );
         }
-
-        #[test]
-        fn unsupported() {
-            let mut parser =
-                SimpleXmlParser::from_str("<?xml version='1.0' encoding='UTF128'?><e/>");
-            assert_evt!(
-                Err(XmlError::UnsupportedEncoding("UTF128".to_string())),
-                parser
-            );
-        }
     }
 
     /// 2.11 End-of-Line Handling

@@ -147,7 +147,7 @@ impl<'a> Parser<'a> for DocTypeDeclToken {
 
 /// Internal Subset
 ///
-///     intSubset ::= (markupdecl | DeclSep)*
+/// intSubset ::= (markupdecl | DeclSep)*
 struct IntSubsetToken;
 
 impl<'a> Parser<'a> for IntSubsetToken {
@@ -168,8 +168,8 @@ impl<'a> Parser<'a> for IntSubsetToken {
 
 /// Parser for Markup Declaration or Declaration Seperator
 ///
-///     markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
-///     DeclSep ::= PEReference | S
+/// markupdecl ::= elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
+/// DeclSep ::= PEReference | S
 ///
 struct MarkupDeclToken;
 
@@ -215,7 +215,7 @@ impl<'a> Parser<'a> for MarkupDeclToken {
 
 /// Element Type Declaration
 ///
-///     elementdecl	   ::=   	'<!ELEMENT' S Name S contentspec S? '>'
+/// elementdecl	   ::=   	'<!ELEMENT' S Name S contentspec S? '>'
 ///
 struct ElementDeclToken;
 
@@ -242,7 +242,7 @@ impl<'a> Parser<'a> for ElementDeclToken {
 
 /// Content Spec
 ///
-///     contentspec	   ::=   	'EMPTY' | 'ANY' | Mixed | children
+/// contentspec	   ::=   	'EMPTY' | 'ANY' | Mixed | children
 ///
 struct ContentSpecToken;
 
@@ -386,7 +386,7 @@ impl<'a> Parser<'a> for SeqToken {
 
 /// Mixed Content
 ///
-///     Mixed	   ::=   	'(' S? '#PCDATA' (S? '|' S? Name)* S? ')*' | '(' S? '#PCDATA' S? ')'
+/// Mixed	   ::=   	'(' S? '#PCDATA' (S? '|' S? Name)* S? ')*' | '(' S? '#PCDATA' S? ')'
 struct MixedToken;
 
 impl<'a> Parser<'a> for MixedToken {
