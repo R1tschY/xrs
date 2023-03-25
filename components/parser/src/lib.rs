@@ -19,6 +19,8 @@ use crate::XmlError::{ExpectedElementEnd, IllegalNameStartChar};
 
 pub(crate) mod cow;
 mod dtd;
+#[cfg(feature = "encoding")]
+pub mod encoding;
 mod namespace;
 pub mod parser;
 mod reader;
@@ -297,6 +299,13 @@ pub enum XmlError {
     IllegalNamespaceUri(String),
     Io(String),
     Decoding(String),
+    UnsupportedVersion(String),
+}
+
+impl From<io::Error> for XmlError {
+    fn from(value: io::Error) -> Self {
+        XmlError::Io(value.to_string())
+    }
 }
 
 impl Display for XmlError {
