@@ -8,7 +8,10 @@ use reqwest::header::HeaderValue;
 use reqwest::{IntoUrl, Url};
 use serde::{Deserialize, Serialize};
 
-use crate::{MethodResponse, XmlRpcError};
+use xrs_parser::encoding::decode;
+
+use crate::de::DeError;
+use crate::{de, MethodResponse, XmlRpcError};
 
 static DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
@@ -102,7 +105,7 @@ impl XmlRpcClient {
         let res = self
             .http
             .post(self.url.clone())
-            .header(reqwest::header::CONTENT_TYPE, "test/xml;charset=utf-8")
+            .header(reqwest::header::CONTENT_TYPE, "text/xml;charset=utf-8")
             .body(call)
             .send()
             .await?;
@@ -120,15 +123,23 @@ impl XmlRpcClient {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<Mime>().ok());
-        if let Some(mime_type) = content_type {
+
+        if let Some(mime_type) = content_type.as_ref() {
             if !(mime_type.type_() == "text" && mime_type.subtype() == "xml") {
                 return Err(XmlRpcError::new_content_type(mime_type.as_ref()));
             }
         }
 
-        let content = res.text().await?;
-        debug!("response: {}", content);
-        *buffer = content;
+        let encoding = content_type
+            .as_ref()
+            .and_then(|content_type| content_type.get_param(mime::CHARSET))
+            .map(|charset| charset.as_str());
+
+        let content = res.bytes().await?;
+
+        let (text, _, _) = decode(&content, encoding).map_err(|err| DeError::from(err))?;
+        debug!("response: {}", text);
+        *buffer = text.into_owned();
         match crate::de::method_response_from_str(buffer)? {
             MethodResponse::Success(result) => Ok(result),
             MethodResponse::Fault(fault) => Err(XmlRpcError::new_fault(
