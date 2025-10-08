@@ -3,8 +3,6 @@
 use std::borrow::Cow;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::fs::read_to_string;
-use std::str::from_utf8;
 use std::{fmt, io};
 
 pub use namespace::parser::*;
@@ -15,7 +13,6 @@ use xrs_chars::XmlAsciiChar;
 use xrs_chars::XmlChar;
 
 use crate::dtd::DocTypeDecl;
-use crate::XmlError::{ExpectedElementEnd, IllegalNameStartChar};
 
 pub(crate) mod cow;
 mod dtd;
@@ -24,7 +21,6 @@ pub mod encoding;
 mod namespace;
 pub mod parser;
 mod reader;
-pub mod shufti;
 pub mod simple;
 
 /// XML Declaration

@@ -8,6 +8,7 @@ members = [
     "components/serde",
     "components/writer",
     "components/xmlrpc",
+    "components/textsimd",
 ]
 
 [profile.release]
