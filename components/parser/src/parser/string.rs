@@ -64,12 +64,7 @@ impl<'a, P: Fn(u8) -> bool> Parser<'a> for Bytes<P> {
     type Error = ();
 
     fn parse(&self, cur: Cursor<'a>) -> Result<(Self::Attribute, Cursor<'a>), Self::Error> {
-        if let Some((i, c)) = cur
-            .rest_bytes()
-            .iter()
-            .enumerate()
-            .find(|(_, &c)| !(self.predicate)(c))
-        {
+        if let Some(i) = cur.rest_bytes().iter().position(|c| !(self.predicate)(*c)) {
             if i > 0 {
                 Ok(cur.advance2(i))
             } else {
