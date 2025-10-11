@@ -1,0 +1,265 @@
+<!--suppress ALL -->
+<!-- @formatter:off -->
+<testsuite>
+    <test>
+        <description>Test allowed characters</description>
+        <level>wf</level>
+        <sections>2.2</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e>
+                &#x9;a
+                b&#xA;b
+                &#xD;
+                &#x20;c
+                &#xD7FF;
+                &#xE000;
+                &#xFFFD;
+                &#x10000;
+                &#x10FFFF;
+            </e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e>
+                	a
+                b
+b
+                &#xD;
+                 c
+                &#xD7FF;
+                &#xE000;
+                &#xFFFD;
+                &#x10000;
+                &#x10FFFF;
+            </e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Start tag and end tag</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Empty tag</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e/>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Whitespace in tag</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e   ></e   >
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Whitespace in empty tag</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e   />
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Attribute Double Quote</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e attr="value"></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e attr="value"></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Attribute Single Quote</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e attr='value'></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e attr="value"></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Multiple attributes</description>
+        <level>wf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e attr1='value' attr2='value'></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e attr1="value" attr2="value"></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Duplicated attribute</description>
+        <level>nwf</level>
+        <sections>3.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e attr='value' attr='value'></e>
+            ]]></input>
+    </test>
+
+    <test>
+        <description>Escape sequence in attribute</description>
+        <level>wf</level>
+        <sections>2.4 3.1 4.1</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e attr="&apos;&quot;&#36;"></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e attr="&apos;&quot;$"></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Comment in body</description>
+        <level>wf</level>
+        <sections>2.5</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e><!-- Comment --></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e><!-- Comment --></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Comment in prolog</description>
+        <level>wf</level>
+        <sections>2.5</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <!-- Comment -->
+            <e></e>
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <!-- Comment -->
+            <e></e>
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>Comment in epilog</description>
+        <level>wf</level>
+        <sections>2.5</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e></e>
+            <!-- Comment -->
+            ]]></input>
+
+        <!--language=XML-->
+        <norm><![CDATA[
+            <e></e>
+            <!-- Comment -->
+            ]]></norm>
+    </test>
+
+    <test>
+        <description>-- in comment</description>
+        <level>nwf</level>
+        <sections>2.5</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e><!-- -- --></e>
+            ]]></input>
+    </test>
+
+    <test>
+        <description>Comment ending with --></description>
+        <level>nwf</level>
+        <sections>2.5</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e><!-- ---></e>
+            ]]></input>
+    </test>
+
+    <test>
+        <description>Comment in markup</description>
+        <level>nwf</level>
+        <sections>2.5</sections>
+
+        <!--language=XML-->
+        <input><![CDATA[
+            <e <!-- Comment --> />
+            ]]></input>
+    </test>
+</testsuite>
+<!-- @formatter:on -->

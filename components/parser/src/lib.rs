@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::error::Error;
+use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 use std::{fmt, io};
 
@@ -306,7 +307,56 @@ impl From<io::Error> for XmlError {
 
 impl Display for XmlError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self {
+            XmlError::IllegalNameStartChar(c) => write!(f, "Illegal name start char: {c}"),
+            XmlError::IllegalChar(c) => write!(f, "Illegal char: {c}"),
+            XmlError::ExpectedElementStart => write!(f, "Expected element start"),
+            XmlError::ExpectedElementEnd => write!(f, "Expected element end"),
+            XmlError::ExpectedAttrName => write!(f, "Expected attribute name"),
+            XmlError::ExpectedEquals => write!(f, "Expected '='"),
+            XmlError::ExpectedDocumentEnd => write!(f, "Expected document end"),
+            XmlError::Expected(expected) => {
+                f.write_str("Expected one of: ")?;
+                for (i, e) in expected.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}", e)?;
+                }
+                Ok(())
+            }
+            XmlError::ExpectedWhitespace => write!(f, "Expected whitespace"),
+            XmlError::WrongETagName { expected_name } => {
+                write!(f, "Wrong end tag name, expected '{}'", expected_name)
+            }
+            XmlError::UnexpectedEof => write!(f, "Unexpected end of file"),
+            XmlError::IllegalCDataSectionEnd => write!(f, "Illegal CDATA section end"),
+            XmlError::UnexpectedDtdEntry => write!(f, "Unexpected DTD entry"),
+            XmlError::ETagAfterRootElement => write!(f, "End tag after root element"),
+            XmlError::OpenElementAtEof => write!(f, "Open element at end of file"),
+            XmlError::NonUniqueAttribute { attribute } => {
+                write!(f, "Non-unique attribute '{}'", attribute)
+            }
+            XmlError::IllegalName { name } => write!(f, "Illegal name '{}'", name),
+            XmlError::InvalidCharacterReference(s) => {
+                write!(f, "Invalid character reference '{}'", s)
+            }
+            XmlError::InvalidCharacter(c) => write!(f, "Invalid character '{}'", c),
+            XmlError::IllegalReference => write!(f, "Illegal reference"),
+            XmlError::UnknownEntity(s) => write!(f, "Unknown entity '{}'", s),
+            XmlError::ExpectToken(token) => write!(f, "Expected token '{}'", token),
+            XmlError::IllegalAttributeValue(msg) => write!(f, "Illegal attribute value: {}", msg),
+            XmlError::UnsupportedEncoding(enc) => write!(f, "Unsupported encoding '{}'", enc),
+            XmlError::DtdError(e) => write!(f, "DTD error: {}", e),
+            XmlError::InvalidPITarget => write!(f, "Invalid processing instruction target 'xml'"),
+            XmlError::UnexpectedCharacter(c) => write!(f, "Unexpected character '{}'", c),
+            XmlError::CommentColonColon => write!(f, "Illegal '--' in comment"),
+            XmlError::UnknownNamespacePrefix(p) => write!(f, "Unknown namespace prefix '{}'", p),
+            XmlError::IllegalNamespaceUri(uri) => write!(f, "Illegal namespace URI '{}'", uri),
+            XmlError::Io(e) => write!(f, "I/O error: {}", e),
+            XmlError::Decoding(e) => write!(f, "Decoding error: {}", e),
+            XmlError::UnsupportedVersion(v) => write!(f, "Unsupported version '{}'", v),
+        }
     }
 }
 
@@ -317,4 +367,27 @@ impl Error for XmlError {}
 pub enum XmlDtdError {
     SyntaxError,
     Unsupported,
+}
+
+impl Display for XmlErrorAtom {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            XmlErrorAtom::XmlDecl => write!(f, "XML declaration"),
+            XmlErrorAtom::CData => write!(f, "CDATA"),
+            XmlErrorAtom::Comment => write!(f, "comment"),
+            XmlErrorAtom::PI => write!(f, "processing instruction"),
+            XmlErrorAtom::Markup => write!(f, "markup"),
+            XmlErrorAtom::Element => write!(f, "element"),
+            XmlErrorAtom::Whitespace => write!(f, "whitespace"),
+        }
+    }
+}
+
+impl Display for XmlDtdError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            XmlDtdError::SyntaxError => write!(f, "DTD syntax error"),
+            XmlDtdError::Unsupported => write!(f, "Unsupported DTD feature"),
+        }
+    }
 }

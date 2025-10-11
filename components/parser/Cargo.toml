@@ -19,8 +19,9 @@ encoding_rs = { version = "^0.8.32", optional = true }
 xrs-xts = { path = "../xts" }
 serde_json = "1"
 criterion = "0.3"
-quick-xml = "0.22.0"
+quick-xml = { version = "0.37.2", features = ["serialize"] }
 xml-rs = "0.8.4"
+serde = { version = "1.0.218", features = ["derive"] }
 
 [build-dependencies]
 xrs-xts = { path = "../xts" }
